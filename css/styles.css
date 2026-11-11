@@ -497,6 +497,7 @@ input:focus-visible, textarea:focus-visible { outline: none; }
 }
 
 @media (max-width: 720px) {
+  html { scroll-padding-top: 132px; }
   .wrap { padding: 20px 14px 130px; }
   .top__in { grid-template-columns: 1fr auto; padding: 10px 14px; gap: 10px; }
   .tabs { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: repeat(3, 1fr); }
