@@ -1,244 +1,115 @@
 import { html, render, useState, useEffect, useRef, useMemo } from './vendor/preact-htm.js';
 import {
-  num, itemGeometry, shapeSides, faceArea, sectionArea, calcTotals, sortedTiers,
+  num, itemGeometry, shapeSides, shapeOutline, sectionArea, calcTotals, sortedTiers,
   templateVars, templateParts, usedKeys, normKey,
   fmtArea, fmtInt, fmtNum, fmtPrice, plural,
 } from './calc.js';
-import { uid, newItem, defaultDraft, normalizeSettings, DEFAULT_TEMPLATES } from './defaults.js';
+import { uid, newItem, defaultDraft, normalizeSettings, normalizeDraft, DEFAULT_TEMPLATES } from './defaults.js';
 import {
-  loadSettings, saveSettings, loadDraft, saveDraft, loadTheme, saveTheme,
-  cloudConfigured, initCloud, pushSettings, signIn, signOutCloud,
+  loadSettings, saveSettings, loadDraft, saveDraft, loadOrders, saveOrders, loadTheme, saveTheme,
+  cloudConfigured, initCloud, pushSettings, pushOrder, signIn, signOutCloud,
 } from './store.js';
+import { Icon, Num, Text, Stepper, Switch, AutoText, copyText } from './ui.js';
+import { Diagram, PolyEditor } from './diagram.js';
 
-// ── Иконки ──────────────────────────────────────────────────────
-
-const svg = (body, size = 20) => html`
-  <svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
-
-const Icon = {
-  rect: () => svg(html`<rect x="3" y="6.5" width="18" height="11" rx="1.5" />`),
-  circle: () => svg(html`<circle cx="12" cy="12" r="8.5" />`),
-  trap: () => svg(html`<path d="M3.5 9.5 20.5 5.5v13l-17-4z" />`),
-  custom: () => svg(html`<path d="M4 10.5 10.5 4l9.5 3.5-2.5 11.5-11 1z" />`),
-  plus: () => svg(html`<path d="M12 5v14M5 12h14" />`, 18),
-  minus: () => svg(html`<path d="M5 12h14" />`, 18),
-  x: () => svg(html`<path d="M6 6l12 12M18 6 6 18" />`, 18),
-  copy: () => svg(html`<rect x="8.5" y="8.5" width="11" height="11" rx="2.5" /><path d="M15.5 8.5v-2a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />`, 18),
-  check: () => svg(html`<path d="m5 12.5 4.5 4.5L19 7.5" />`, 18),
-  share: () => svg(html`<path d="M12 15V4m0 0L8 8m4-4 4 4M5 13v4.5A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5V13" />`, 18),
-  dup: () => svg(html`<rect x="4.5" y="4.5" width="11" height="11" rx="2.5" /><path d="M9 19.5h8a2.5 2.5 0 0 0 2.5-2.5V9" />`, 18),
-  moon: () => svg(html`<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />`, 18),
-  sun: () => svg(html`<circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />`, 18),
-  auto: () => svg(html`<circle cx="12" cy="12" r="8.5" /><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor" />`, 18),
-  reset: () => svg(html`<path d="M4 12a8 8 0 1 0 2.6-5.9M4 4.5V9h4.5" />`, 16),
-  down: () => svg(html`<path d="M12 5v14m0 0-5-5m5 5 5-5" />`, 18),
-  cloud: () => svg(html`<path d="M7 18.5a4.5 4.5 0 0 1-.6-8.96 6 6 0 0 1 11.5 1.5A3.75 3.75 0 0 1 17.25 18.5z" />`, 18),
-};
+// ── Справочники ─────────────────────────────────────────────────
 
 const SHAPES = [
   { id: 'rect', label: 'Прямоугольник' },
   { id: 'circle', label: 'Круг' },
   { id: 'trap', label: 'Трапеция' },
-  { id: 'custom', label: 'Своя площадь' },
+  { id: 'poly', label: 'Своя форма' },
+  { id: 'custom', label: 'Площадь' },
 ];
 
 const KINDS = {
   surfaces: {
     title: 'Поверхности',
     hint: 'Столешницы, столы, подоконники',
-    names: { rect: 'Столешница', circle: 'Круглый стол', trap: 'Трапеция', custom: 'Своя форма' },
+    icon: 'rect',
+    names: { rect: 'Столешница', circle: 'Круглый стол', trap: 'Трапеция', poly: 'Своя форма', custom: 'Известная площадь' },
     fields: {
       rect: [['l', 'Длина'], ['w', 'Ширина']],
       circle: [['d', 'Диаметр']],
       trap: [['h', 'Длина'], ['a', 'Сторона A'], ['b', 'Сторона B']],
+      trap4: [['a', 'Сторона A'], ['b', 'Сторона B'], ['s1', 'Грань сверху'], ['s2', 'Грань снизу']],
     },
-    add: [['rect', 'Прямоугольная'], ['circle', 'Круглая'], ['trap', 'Трапеция'], ['custom', 'Своя площадь']],
+    add: [['rect', 'Прямоугольная'], ['circle', 'Круглая'], ['trap', 'Трапеция'], ['poly', 'Своя форма']],
   },
   stairs: {
     title: 'Лестница',
     hint: 'Ступени, площадки, подступенки',
-    names: { rect: 'Прямые ступени', circle: 'Круглая площадка', trap: 'Забежные ступени', custom: 'Своя форма' },
+    icon: 'stairs',
+    names: { rect: 'Прямые ступени', circle: 'Круглая площадка', trap: 'Забежные ступени', poly: 'Ступени своей формы', custom: 'Известная площадь' },
     fields: {
       rect: [['l', 'Длина'], ['w', 'Глубина']],
       circle: [['d', 'Диаметр']],
       trap: [['h', 'Длина'], ['a', 'Узкий край'], ['b', 'Широкий край']],
+      trap4: [['a', 'Узкий край'], ['b', 'Широкий край'], ['s1', 'Грань сверху'], ['s2', 'Грань снизу']],
     },
-    add: [['rect', 'Прямые ступени'], ['trap', 'Трапециевидные'], ['custom', 'Своя площадь']],
+    add: [['rect', 'Прямые ступени'], ['trap', 'Трапециевидные'], ['poly', 'Своя форма']],
   },
 };
 
 const COAT_LABEL = { lacquer: 'Лак', oil: 'Масло-воск' };
 
-// ── Мелкие помощники ────────────────────────────────────────────
-
-function cleanNum(v, decimal) {
-  let s = String(v).replace(decimal ? /[^\d.,]/g : /\D/g, '');
-  if (decimal) {
-    const i = s.search(/[.,]/);
-    if (i >= 0) s = s.slice(0, i + 1) + s.slice(i + 1).replace(/[.,]/g, '');
-  }
-  return s;
+/** Телефон в международном виде без знаков: «8 (999) 123-45-67» → «79991234567». */
+function phoneDigits(phone) {
+  let d = String(phone || '').replace(/\D/g, '');
+  if (d.length === 11 && d[0] === '8') d = '7' + d.slice(1);
+  if (d.length === 10) d = '7' + d;
+  return d.length >= 11 ? d : '';
 }
 
-async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return true; } catch { /* запасной способ ниже */ }
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
-  document.body.append(ta);
-  ta.select();
-  let ok = false;
-  try { ok = document.execCommand('copy'); } catch { /* noop */ }
-  ta.remove();
-  return ok;
-}
-
-// ── Поля ввода ──────────────────────────────────────────────────
-
-function Num({ value, onChange, onBlur, label, suffix, placeholder, decimal, group, cls, aria }) {
-  const [focus, setFocus] = useState(false);
-  const raw = value === null || value === undefined ? '' : String(value);
-  const shown = group && !focus && raw !== '' ? fmtInt(raw) : raw;
-  const onInput = (e) => {
-    const v = cleanNum(e.target.value, decimal);
-    if (v !== e.target.value) e.target.value = v;
-    onChange(v);
-  };
-  return html`
-    <label class=${'field ' + (cls || '')}>
-      ${label ? html`<span class="field__label">${label}</span>` : null}
-      <span class="field__box">
-        <input type="text" inputmode=${decimal ? 'decimal' : 'numeric'} autocomplete="off" enterkeyhint="done"
-          value=${shown} placeholder=${placeholder ?? '0'} aria-label=${aria || label}
-          onInput=${onInput}
-          onFocus=${(e) => { setFocus(true); const el = e.target; requestAnimationFrame(() => el.select()); }}
-          onBlur=${() => { setFocus(false); onBlur?.(); }} />
-        ${suffix ? html`<span class="field__suffix">${suffix}</span>` : null}
-      </span>
-    </label>`;
-}
-
-function Stepper({ value, onChange, label }) {
-  const n = num(value);
-  return html`
-    <div class="field field--stepper">
-      <span class="field__label">${label}</span>
-      <span class="stepper">
-        <button type="button" class="stepper__btn" aria-label="Меньше" onClick=${() => onChange(Math.max(1, n - 1))}>${Icon.minus()}</button>
-        <input type="text" inputmode="numeric" autocomplete="off" value=${value} aria-label=${label}
-          onInput=${(e) => { const v = cleanNum(e.target.value); if (v !== e.target.value) e.target.value = v; onChange(v); }}
-          onFocus=${(e) => { const el = e.target; requestAnimationFrame(() => el.select()); }} />
-        <button type="button" class="stepper__btn" aria-label="Больше" onClick=${() => onChange(n + 1)}>${Icon.plus()}</button>
-      </span>
-    </div>`;
-}
-
-function Switch({ on, onChange, label }) {
-  return html`
-    <button type="button" role="switch" aria-checked=${on ? 'true' : 'false'} class=${'switch' + (on ? ' is-on' : '')}
-      aria-label=${label} onClick=${() => onChange(!on)}><span class="switch__dot"></span></button>`;
-}
-
-function AutoText({ value, onInput, placeholder, innerRef, cls }) {
-  const own = useRef(null);
-  const ref = innerRef || own;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 2 + 'px';
-  }, [value]);
-  return html`<textarea ref=${ref} class=${'textarea ' + (cls || '')} value=${value} placeholder=${placeholder}
-    onInput=${(e) => onInput(e.target.value)} rows="3"></textarea>`;
-}
-
-// ── Схема фигуры с нажимаемыми гранями ──────────────────────────
-
-function Diagram({ item, onToggle }) {
-  const W = 240, H = 140, PX = 30, PY = 26;
-  const bw = W - PX * 2, bh = H - PY * 2;
-  const cx = W / 2, cy = H / 2;
-  const edges = item.edges || {};
-  const area = faceArea(item);
-  const sides = shapeSides(item);
-  const len = Object.fromEntries(sides.map((s) => [s.id, s.len]));
-
-  const edgeProps = (id) => ({
-    role: 'switch', tabindex: 0, 'aria-checked': edges[id] ? 'true' : 'false',
-    onClick: () => onToggle(id),
-    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(id); } },
-  });
-
-  if (item.shape === 'circle') {
-    const r = Math.min(bw, bh) / 2 + 8;
-    const on = !!edges.c;
-    return html`
-      <svg class=${'diagram' + (area ? '' : ' is-ghost')} viewBox="0 0 ${W} ${H}" role="group" aria-label="Схема: нажмите на край, чтобы учесть торец">
-        <circle class="diagram__fill" cx=${cx} cy=${cy} r=${r} />
-        <circle class=${'edge' + (on ? ' is-on' : '')} cx=${cx} cy=${cy} r=${r} fill="none" />
-        <circle class="edge-hit" cx=${cx} cy=${cy} r=${r} fill="none" aria-label="Торец по окружности" ...${edgeProps('c')} />
-        <text class="diagram__center" x=${cx} y=${cy + 4} text-anchor="middle">${area ? '⌀ ' + fmtInt(item.d) : 'диаметр'}</text>
-      </svg>`;
-  }
-
-  // Прямоугольник и трапеция: горизонталь — длина, вертикаль — ширина (стороны A и B).
-  const isTrap = item.shape === 'trap';
-  let lx = isTrap ? num(item.h) : num(item.l);
-  let la = isTrap ? num(item.a) : num(item.w);
-  let lb = isTrap ? num(item.b) : num(item.w);
-  const ghost = !(lx > 0 && Math.max(la, lb) > 0);
-  if (ghost) { lx = 2; la = isTrap ? 0.6 : 1; lb = 1; }
-  const ly = Math.max(la, lb);
-  const s = Math.min(bw / lx, bh / ly);
-  const dw = Math.min(bw, Math.max(lx * s, 64));
-  const dh = Math.min(bh, Math.max(ly * s, 40));
-  const x0 = cx - dw / 2, x1 = cx + dw / 2;
-  const ha = (dh * la) / ly / 2, hb = (dh * lb) / ly / 2;
-  const P = { tl: [x0, cy - ha], tr: [x1, cy - hb], br: [x1, cy + hb], bl: [x0, cy + ha] };
-  const lines = [
-    { id: 't', a: P.tl, b: P.tr, name: 'Верхняя грань' },
-    { id: 'r', a: P.tr, b: P.br, name: 'Правая грань' },
-    { id: 'b', a: P.br, b: P.bl, name: 'Нижняя грань' },
-    { id: 'l', a: P.bl, b: P.tl, name: 'Левая грань' },
-  ];
-  const label = (id) => (ghost || !len[id] ? '' : fmtInt(len[id]));
-  const midT = (P.tl[1] + P.tr[1]) / 2, midB = (P.bl[1] + P.br[1]) / 2;
-
-  return html`
-    <svg class=${'diagram' + (ghost ? ' is-ghost' : '')} viewBox="0 0 ${W} ${H}" role="group" aria-label="Схема: нажмите на грань, чтобы учесть торец">
-      <polygon class="diagram__fill" points=${[P.tl, P.tr, P.br, P.bl].map((p) => p.join(',')).join(' ')} />
-      ${lines.map((ln) => html`
-        <line class=${'edge' + (edges[ln.id] ? ' is-on' : '')} x1=${ln.a[0]} y1=${ln.a[1]} x2=${ln.b[0]} y2=${ln.b[1]} />`)}
-      <text class=${'diagram__dim' + (edges.t ? ' is-on' : '')} x=${cx} y=${midT - 9} text-anchor="middle">${label('t')}</text>
-      <text class=${'diagram__dim' + (edges.b ? ' is-on' : '')} x=${cx} y=${midB + 17} text-anchor="middle">${label('b')}</text>
-      <text class=${'diagram__dim' + (edges.l ? ' is-on' : '')} x=${x0 - 10} y=${cy} text-anchor="middle"
-        transform="rotate(-90 ${x0 - 10} ${cy})">${label('l')}</text>
-      <text class=${'diagram__dim' + (edges.r ? ' is-on' : '')} x=${x1 + 10} y=${cy} text-anchor="middle"
-        transform="rotate(90 ${x1 + 10} ${cy})">${label('r')}</text>
-      ${lines.map((ln) => html`
-        <line class="edge-hit" x1=${ln.a[0]} y1=${ln.a[1]} x2=${ln.b[0]} y2=${ln.b[1]} aria-label=${ln.name} ...${edgeProps(ln.id)} />`)}
-    </svg>`;
-}
+const fmtDate = (ts) => new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+const fmtDateTime = (ts) => new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 // ── Карточка позиции ────────────────────────────────────────────
 
-function ItemCard({ item, kind, index, onChange, onDelete, onDuplicate }) {
+function ItemCard({ item, kind, index, onChange, onDelete, onDuplicate, onEditPoly }) {
   const K = KINDS[kind];
   const g = itemGeometry(item);
   const set = (key) => (v) => onChange((it) => { it[key] = v; });
   const sides = shapeSides(item);
-  const allOn = sides.length > 0 && sides.every((s) => item.edges?.[s.id]);
-  const anyOn = sides.some((s) => item.edges?.[s.id]);
+  const allOn = sides.length > 0 && sides.every((s) => s.on);
+  const anyOn = sides.some((s) => s.on);
   const isCustom = item.shape === 'custom';
+  const isPoly = item.shape === 'poly';
+  const hasPoly = isPoly && (item.pts || []).length >= 3;
+  const outline = item.shape === 'trap' ? shapeOutline(item) : null;
+  const badTrap = !!(outline && !outline.valid && outline.filled);
 
-  const setShape = (shape) => onChange((it) => {
-    const keep = ['rect', 'trap'].includes(it.shape) && ['rect', 'trap'].includes(shape);
-    if (!keep) it.edges = {};
-    it.shape = shape;
+  const setShape = (shape) => {
+    onChange((it) => {
+      const keep = ['rect', 'trap'].includes(it.shape) && ['rect', 'trap'].includes(shape);
+      if (!keep) it.edges = {};
+      it.shape = shape;
+    });
+    if (shape === 'poly' && !hasPoly) onEditPoly();
+  };
+  const toggleEdge = (id) => onChange((it) => {
+    if (it.shape === 'poly') { const p = it.pts[Number(id)]; if (p) p.e = !p.e; }
+    else it.edges = { ...(it.edges || {}), [id]: !it.edges?.[id] };
   });
-  const toggleEdge = (id) => onChange((it) => { it.edges = { ...(it.edges || {}), [id]: !it.edges?.[id] }; });
-  const setAll = (on) => onChange((it) => { it.edges = on ? Object.fromEntries(shapeSides(it).map((s) => [s.id, true])) : {}; });
+  const setAll = (on) => onChange((it) => {
+    if (it.shape === 'poly') it.pts.forEach((p) => { p.e = on; });
+    else it.edges = on ? Object.fromEntries(shapeSides(it).map((s) => [s.id, true])) : {};
+  });
+  // Переход между «длина + 2 стороны» и «4 грани»: размеры пересчитываются, чтобы фигура не менялась.
+  const toggleFour = () => onChange((it) => {
+    if (!it.four) {
+      const leg = Math.round(Math.hypot(num(it.h), (num(it.a) - num(it.b)) / 2));
+      if (leg > 0) { if (!num(it.s1)) it.s1 = leg; if (!num(it.s2)) it.s2 = leg; }
+    } else {
+      const o = shapeOutline(it);
+      if (o.valid) it.h = Math.round(o.pts[1].x);
+    }
+    it.four = !it.four;
+  });
+
+  const fields = item.shape === 'trap' && item.four ? K.fields.trap4 : K.fields[item.shape];
+  const hint = badTrap ? 'Из таких размеров фигура не складывается — проверьте грани'
+    : anyOn ? 'Выделенные грани войдут в расчёт' : 'Нажмите на грани, которые нужно обработать';
 
   return html`
     <article class="item">
@@ -254,7 +125,7 @@ function ItemCard({ item, kind, index, onChange, onDelete, onDuplicate }) {
 
       <div class="shape-seg" role="radiogroup" aria-label="Форма">
         ${SHAPES.map((s) => html`
-          <button type="button" role="radio" aria-checked=${item.shape === s.id ? 'true' : 'false'}
+          <button type="button" role="radio" aria-checked=${item.shape === s.id ? 'true' : 'false'} title=${s.label}
             class=${'shape-seg__btn' + (item.shape === s.id ? ' is-on' : '')} onClick=${() => setShape(s.id)}>
             ${Icon[s.id]()}<span>${s.label}</span>
           </button>`)}
@@ -262,20 +133,29 @@ function ItemCard({ item, kind, index, onChange, onDelete, onDuplicate }) {
 
       <div class=${'item__body' + (isCustom ? ' item__body--flat' : '')}>
         <div class="item__fields">
-          <div class="fields">
-            ${isCustom
-              ? html`
-                <${Num} label="Площадь" suffix="м²" decimal value=${item.area} onChange=${set('area')} placeholder="0,00" />
-                <${Num} label="Длина торцов" suffix="мм" value=${item.edgeLen} onChange=${set('edgeLen')} />`
-              : K.fields[item.shape].map(([key, label]) => html`
+          ${isCustom ? html`
+            <div class="fields">
+              <${Num} label="Площадь" suffix="м²" decimal value=${item.area} onChange=${set('area')} placeholder="0,00" />
+              <${Num} label="Длина торцов" suffix="мм" value=${item.edgeLen} onChange=${set('edgeLen')} />
+            </div>` : null}
+          ${fields ? html`
+            <div class="fields">
+              ${fields.map(([key, label]) => html`
                 <${Num} key=${key} label=${label} suffix="мм" value=${item[key]} onChange=${set(key)} />`)}
-          </div>
+            </div>` : null}
+          ${isPoly ? html`
+            <button type="button" class="adder adder--wide" onClick=${onEditPoly}>
+              ${Icon.pen()}<span>${hasPoly ? 'Изменить форму' : 'Нарисовать форму'}</span>
+            </button>` : null}
           <div class="fields">
             <${Stepper} label="Количество" value=${item.qty} onChange=${set('qty')} />
             <${Num} label="Толщина торца" suffix="мм" value=${item.thickness} onChange=${set('thickness')} />
           </div>
           <div class="chips">
-            ${!isCustom ? html`
+            ${item.shape === 'trap' ? html`
+              <button type="button" class=${'chip' + (item.four ? ' is-on' : '')} aria-pressed=${item.four ? 'true' : 'false'}
+                onClick=${toggleFour}>4 разные грани</button>` : null}
+            ${!isCustom && (!isPoly || hasPoly) ? html`
               <button type="button" class=${'chip' + (allOn ? ' is-on' : '')} aria-pressed=${allOn ? 'true' : 'false'}
                 onClick=${() => setAll(!allOn)}>${item.shape === 'circle' ? 'Торец по кругу' : 'Все торцы'}</button>` : null}
             <button type="button" class=${'chip' + (item.bothSides ? ' is-on' : '')} aria-pressed=${item.bothSides ? 'true' : 'false'}
@@ -285,8 +165,10 @@ function ItemCard({ item, kind, index, onChange, onDelete, onDuplicate }) {
 
         ${!isCustom ? html`
           <div class="item__diagram">
-            <${Diagram} item=${item} onToggle=${toggleEdge} />
-            <p class="item__hint">${anyOn ? 'Выделенные грани войдут в расчёт' : 'Нажмите на грани, которые нужно обработать'}</p>
+            ${isPoly && !hasPoly
+              ? html`<button type="button" class="item__draw" onClick=${onEditPoly}>${Icon.poly()}<span>Форма не задана</span></button>`
+              : html`<${Diagram} item=${item} onToggle=${toggleEdge} />`}
+            ${!isPoly || hasPoly ? html`<p class=${'item__hint' + (badTrap ? ' is-bad' : '')}>${hint}</p>` : null}
           </div>` : null}
       </div>
 
@@ -303,11 +185,15 @@ function ItemCard({ item, kind, index, onChange, onDelete, onDuplicate }) {
 
 // ── Раздел (поверхности / лестница) ─────────────────────────────
 
-function Section({ no, kind, items, settings, upDraft, withUndo }) {
+function Section({ no, kind, items, settings, upDraft, withUndo, onEditPoly }) {
   const K = KINDS[kind];
   const area = sectionArea(items);
   const count = items.reduce((s, it) => s + num(it.qty), 0);
-  const add = (shape) => upDraft((d) => { d[kind].push(newItem(kind, shape, settings)); });
+  const add = (shape) => {
+    const it = newItem(kind, shape, settings);
+    upDraft((d) => { d[kind].push(it); });
+    if (shape === 'poly') onEditPoly(kind, it.id);
+  };
   const meta = kind === 'stairs' && count > 0
     ? `${fmtInt(count)} ${plural(count, ['ступень', 'ступени', 'ступеней'])}`
     : K.hint;
@@ -326,6 +212,7 @@ function Section({ no, kind, items, settings, upDraft, withUndo }) {
       <div class="items">
         ${items.map((item, i) => html`
           <${ItemCard} key=${item.id} item=${item} kind=${kind} index=${i}
+            onEditPoly=${() => onEditPoly(kind, item.id)}
             onChange=${(fn) => upDraft((d) => { const it = d[kind].find((x) => x.id === item.id); if (it) fn(it); })}
             onDuplicate=${() => upDraft((d) => {
               const at = d[kind].findIndex((x) => x.id === item.id);
@@ -343,17 +230,41 @@ function Section({ no, kind, items, settings, upDraft, withUndo }) {
     </section>`;
 }
 
+// ── Выбор разделов ──────────────────────────────────────────────
+
+function Modes({ draft, settings, upDraft }) {
+  const toggle = (key) => upDraft((d) => {
+    const other = key === 'surfaces' ? 'stairs' : 'surfaces';
+    const next = !d.show[key];
+    d.show[key] = next;
+    if (!next && !d.show[other]) d.show[other] = true;
+    for (const k of ['surfaces', 'stairs']) {
+      if (d.show[k] && !d[k].length) d[k].push(newItem(k, 'rect', settings));
+    }
+  });
+  return html`
+    <div class="modes" role="group" aria-label="Что считаем">
+      ${['surfaces', 'stairs'].map((key) => html`
+        <button type="button" class=${'mode' + (draft.show[key] ? ' is-on' : '')} aria-pressed=${draft.show[key] ? 'true' : 'false'}
+          onClick=${() => toggle(key)}>
+          <span class="mode__icon">${Icon[KINDS[key].icon]()}</span>
+          <span class="mode__text"><b>${KINDS[key].title}</b><i>${KINDS[key].hint}</i></span>
+          <span class="mode__check">${Icon.check()}</span>
+        </button>`)}
+    </div>`;
+}
+
 // ── Условия: ночная работа ──────────────────────────────────────
 
 const NIGHT_STEPS = ['1.5', '1.6', '1.7', '1.8', '1.9', '2'];
 
-function Conditions({ draft, upDraft }) {
+function Conditions({ no, draft, upDraft }) {
   const n = draft.night;
   const k = num(n.k);
   return html`
     <section class="section">
       <header class="section__head">
-        <span class="section__no">03</span>
+        <span class="section__no">${no}</span>
         <div class="section__title"><h2>Условия</h2><p>Коэффициент к стоимости работ</p></div>
       </header>
       <div class=${'card night' + (n.on ? ' is-on' : '')}>
@@ -378,9 +289,47 @@ function Conditions({ draft, upDraft }) {
     </section>`;
 }
 
+// ── Клиент и сохранение ─────────────────────────────────────────
+
+function ClientSection({ no, draft, upDraft, saved, dirty, onSave }) {
+  const c = draft.client;
+  const set = (key) => (v) => upDraft((d) => { d.client[key] = v; });
+  const status = !saved ? 'Расчёт ещё не сохранён'
+    : dirty ? 'Есть несохранённые изменения' : `Сохранён ${fmtDateTime(saved.updatedAt)}`;
+  return html`
+    <section class="section">
+      <header class="section__head">
+        <span class="section__no">${no}</span>
+        <div class="section__title"><h2>Клиент</h2><p>Чтобы сохранить расчёт и вернуться к нему позже</p></div>
+      </header>
+      <div class="card client">
+        <div class="client__grid">
+          <${Text} label="Имя" value=${c.name} onChange=${set('name')} placeholder="Как зовут клиента" autocomplete="off" />
+          <${Text} label="Телефон" type="tel" inputmode="tel" value=${c.phone} onChange=${set('phone')} placeholder="+7" />
+          <${Text} cls="client__wide" label="Адрес" value=${c.address} onChange=${set('address')} placeholder="Город, улица, дом, квартира" />
+          <label class="field client__wide">
+            <span class="field__label">Заметка</span>
+            <${AutoText} cls="textarea--sm" rows="2" value=${c.note} onInput=${set('note')} placeholder="Порода дерева, сроки, пожелания, код домофона…" />
+          </label>
+        </div>
+        <div class="client__foot">
+          <span class=${'client__status' + (saved && !dirty ? ' is-ok' : '')}>${status}</span>
+          <div class="btn-row">
+            ${saved ? html`<button type="button" class="btn btn--ghost" onClick=${() => onSave(true)}>Сохранить как новый</button>` : null}
+            <button type="button" class="btn btn--primary" disabled=${!!saved && !dirty} onClick=${() => onSave(false)}>
+              ${Icon.save()}<span>${saved ? 'Сохранить изменения' : 'Сохранить расчёт'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>`;
+}
+
 // ── Итог ────────────────────────────────────────────────────────
 
-function PriceTile({ coat, price, value, onChange, currency }) {
+function PriceTile({ coat, price, value, onChange, settings }) {
+  const tag = price.note === 'diff' ? `не ниже масла + ${fmtInt(settings.minDiff)}`
+    : price.note === 'min' ? 'минимальный заказ' : 'расчёт';
   return html`
     <div class=${'price' + (price.manual ? ' is-manual' : '')}>
       <div class="price__head">
@@ -388,17 +337,17 @@ function PriceTile({ coat, price, value, onChange, currency }) {
         ${price.manual
           ? html`<button type="button" class="price__reset" onClick=${() => onChange('')} title="Вернуть расчётную цену">
               ${Icon.reset()}<span>расчёт ${fmtInt(price.auto)}</span></button>`
-          : html`<span class="price__tag">расчёт</span>`}
+          : html`<span class=${'price__tag' + (price.note ? ' is-rule' : '')}>${tag}</span>`}
       </div>
-      <${Num} cls="field--price" group suffix=${currency} value=${value ?? ''} placeholder=${fmtInt(price.auto)}
+      <${Num} cls="field--price" group suffix=${settings.currency} value=${value ?? ''} placeholder=${fmtInt(price.auto)}
         aria=${COAT_LABEL[coat] + ': цена вручную'} onChange=${onChange} />
     </div>`;
 }
 
-function Summary({ draft, settings, totals, upDraft, onNew }) {
-  const rows = [['surfaces', 'Поверхности'], ['stairs', 'Лестница']]
-    .filter(([key]) => key === 'surfaces' || draft.stairs.length > 0);
+function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) {
+  const rows = [['surfaces', 'Поверхности'], ['stairs', 'Лестница']].filter(([key]) => draft.show[key]);
   const setRate = (key, coat) => (v) => upDraft((d) => { d.rates[key][coat] = v; });
+  const offRange = rows.some(([key]) => !totals.sections[key].exact);
 
   return html`
     <div class="card total">
@@ -428,23 +377,34 @@ function Summary({ draft, settings, totals, upDraft, onNew }) {
           <div class="rates__row rates__row--note">
             <span class="rates__name">Ночная работа</span><span></span><span class="rates__k">×${fmtNum(totals.k)}</span>
           </div>` : null}
+        ${offRange ? html`<p class="rates__warn">Площадь не попала ни в один диапазон прайса — взята ближайшая ставка.</p>` : null}
       </div>
+
+      ${notice ? html`
+        <div class="notice">
+          <p>С момента сохранения расчёт изменился. Клиенту называли: лак ${fmtPrice(notice.lacquer, settings.currency)}, масло ${fmtPrice(notice.oil, settings.currency)}.</p>
+          <div class="btn-row">
+            <button type="button" class="btn btn--primary btn--sm" onClick=${() => onNotice(true)}>Оставить прежние цены</button>
+            <button type="button" class="btn btn--ghost btn--sm" onClick=${() => onNotice(false)}>Пересчитать</button>
+          </div>
+        </div>` : null}
 
       <div class="prices">
         ${['lacquer', 'oil'].map((c) => html`
-          <${PriceTile} key=${c} coat=${c} price=${totals.price[c]} currency=${settings.currency}
+          <${PriceTile} key=${c} coat=${c} price=${totals.price[c]} settings=${settings}
             value=${draft.manual[c]} onChange=${(v) => upDraft((d) => { d.manual[c] = v; })} />`)}
       </div>
       <p class="total__note">Нажмите на цену или ставку, чтобы указать свою. Пустое поле — расчёт по прайсу.</p>
     </div>`;
 }
 
-function TemplateCard({ tpl, vars, settings, upSettings, toast }) {
+function TemplateCard({ tpl, vars, settings, upSettings, toast, phone }) {
   const [done, setDone] = useState(false);
   const parts = templateParts(tpl.body, vars);
   const text = parts.map((p) => p.text).join('');
   const keys = usedKeys(tpl.body, vars);
   const services = settings.services.filter((s) => keys.includes(normKey(s.key)));
+  const wa = phoneDigits(phone);
 
   const copy = async () => {
     const ok = await copyText(text);
@@ -461,6 +421,9 @@ function TemplateCard({ tpl, vars, settings, upSettings, toast }) {
       <div class="tpl__head">
         <span class="eyebrow">${tpl.title || 'Текст'}</span>
         <div class="tpl__actions">
+          ${wa ? html`
+            <a class="btn btn--ghost btn--sm btn--icon" target="_blank" rel="noopener" aria-label="Отправить в WhatsApp" title="Отправить клиенту в WhatsApp"
+              href=${`https://wa.me/${wa}?text=${encodeURIComponent(text)}`}>${Icon.chat()}</a>` : null}
           ${typeof navigator.share === 'function' ? html`
             <button type="button" class="btn btn--ghost btn--sm btn--icon" aria-label="Поделиться" title="Поделиться" onClick=${share}>${Icon.share()}</button>` : null}
           <button type="button" class=${'btn btn--primary btn--sm' + (done ? ' is-done' : '')} onClick=${copy}>
@@ -480,9 +443,10 @@ function TemplateCard({ tpl, vars, settings, upSettings, toast }) {
 
 // ── Страница «Расчёт» ───────────────────────────────────────────
 
-function CalcPage({ draft, settings, totals, vars, upDraft, upSettings, withUndo, toast, onNew }) {
+function CalcPage({ draft, settings, totals, vars, upDraft, upSettings, withUndo, toast, onNew, saved, dirty, onSave, notice, onNotice }) {
   const summaryRef = useRef(null);
   const [barHidden, setBarHidden] = useState(false);
+  const [polyEdit, setPolyEdit] = useState(null);
 
   useEffect(() => {
     const el = summaryRef.current;
@@ -492,18 +456,26 @@ function CalcPage({ draft, settings, totals, vars, upDraft, upSettings, withUndo
     return () => io.disconnect();
   }, []);
 
+  const shown = ['surfaces', 'stairs'].filter((k) => draft.show[k]);
+  const no = (i) => String(i + 1).padStart(2, '0');
+  const editItem = polyEdit ? draft[polyEdit.kind].find((x) => x.id === polyEdit.id) : null;
+  const onEditPoly = (kind, id) => setPolyEdit({ kind, id });
+
   return html`
     <div class="layout">
       <div class="layout__main">
-        <${Section} no="01" kind="surfaces" items=${draft.surfaces} settings=${settings} upDraft=${upDraft} withUndo=${withUndo} />
-        <${Section} no="02" kind="stairs" items=${draft.stairs} settings=${settings} upDraft=${upDraft} withUndo=${withUndo} />
-        <${Conditions} draft=${draft} upDraft=${upDraft} />
+        <${Modes} draft=${draft} settings=${settings} upDraft=${upDraft} />
+        ${shown.map((kind, i) => html`
+          <${Section} key=${kind} no=${no(i)} kind=${kind} items=${draft[kind]} settings=${settings}
+            upDraft=${upDraft} withUndo=${withUndo} onEditPoly=${onEditPoly} />`)}
+        <${Conditions} no=${no(shown.length)} draft=${draft} upDraft=${upDraft} />
+        <${ClientSection} no=${no(shown.length + 1)} draft=${draft} upDraft=${upDraft} saved=${saved} dirty=${dirty} onSave=${onSave} />
       </div>
 
       <aside class="layout__aside" id="summary" ref=${summaryRef}>
-        <${Summary} draft=${draft} settings=${settings} totals=${totals} upDraft=${upDraft} onNew=${onNew} />
+        <${Summary} draft=${draft} settings=${settings} totals=${totals} upDraft=${upDraft} onNew=${onNew} notice=${notice} onNotice=${onNotice} />
         ${settings.templates.map((tpl) => html`
-          <${TemplateCard} key=${tpl.id} tpl=${tpl} vars=${vars} settings=${settings} upSettings=${upSettings} toast=${toast} />`)}
+          <${TemplateCard} key=${tpl.id} tpl=${tpl} vars=${vars} settings=${settings} upSettings=${upSettings} toast=${toast} phone=${draft.client.phone} />`)}
       </aside>
     </div>
 
@@ -514,6 +486,90 @@ function CalcPage({ draft, settings, totals, vars, upDraft, upSettings, withUndo
         onClick=${() => summaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
         <span>Текст</span>${Icon.down()}
       </button>
+    </div>
+
+    ${editItem ? html`
+      <${PolyEditor} item=${editItem} title=${editItem.name || KINDS[polyEdit.kind].names.poly}
+        onClose=${() => setPolyEdit(null)}
+        onSave=${(pts) => {
+          upDraft((d) => { const it = d[polyEdit.kind].find((x) => x.id === polyEdit.id); if (it) { it.pts = pts; it.shape = 'poly'; } });
+          setPolyEdit(null);
+        }} />` : null}`;
+}
+
+// ── Страница «Заказы» ───────────────────────────────────────────
+
+function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate }) {
+  const [q, setQ] = useState('');
+  const list = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return orders
+      .filter((o) => !o.deleted)
+      .filter((o) => {
+        if (!needle) return true;
+        const c = o.draft?.client || {};
+        return [c.name, c.phone, c.address, c.note].some((v) => String(v || '').toLowerCase().includes(needle));
+      })
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }, [orders, q]);
+  const total = orders.filter((o) => !o.deleted).length;
+
+  return html`
+    <div class="page">
+      <section class="section">
+        <header class="section__head">
+          <div class="section__title"><h2>Заказы</h2>
+            <p>${total ? `${total} ${plural(total, ['сохранённый расчёт', 'сохранённых расчёта', 'сохранённых расчётов'])}` : 'Сохранённые расчёты с данными клиентов'}</p></div>
+        </header>
+
+        ${total > 3 ? html`
+          <label class="field search">
+            <span class="field__box">${Icon.search()}<input type="search" value=${q} placeholder="Имя, телефон или адрес"
+              aria-label="Поиск по заказам" onInput=${(e) => setQ(e.target.value)} /></span>
+          </label>` : null}
+
+        ${!total ? html`
+          <div class="card empty">
+            <h3>Пока пусто</h3>
+            <p>На вкладке «Расчёт» заполните блок «Клиент» и нажмите «Сохранить расчёт» — он появится здесь со всеми размерами и ценами.</p>
+            <a class="btn btn--primary" href="#calc">К расчёту</a>
+          </div>` : null}
+        ${total && !list.length ? html`<p class="lead">Ничего не найдено.</p>` : null}
+
+        <div class="orders">
+          ${list.map((o) => {
+            const c = o.draft?.client || {};
+            const tel = phoneDigits(c.phone);
+            const count = ['surfaces', 'stairs'].filter((k) => o.draft?.show?.[k] !== false)
+              .reduce((s, k) => s + (o.draft?.[k]?.length || 0), 0);
+            return html`
+              <article class=${'card order' + (o.id === currentId ? ' is-current' : '')} key=${o.id}>
+                <button type="button" class="order__main" onClick=${() => onOpen(o)}>
+                  <div class="order__title">
+                    <h3>${c.name || c.address || 'Без имени'}</h3>
+                    ${o.id === currentId ? html`<span class="order__badge">открыт</span>` : null}
+                  </div>
+                  ${c.name && c.address ? html`<p class="order__addr">${c.address}</p>` : null}
+                  ${c.note ? html`<p class="order__note">${c.note}</p>` : null}
+                  <p class="order__meta">${fmtDate(o.updatedAt)} · ${fmtArea(o.totals?.area)} м² · ${count} ${plural(count, ['позиция', 'позиции', 'позиций'])}${o.draft?.night?.on ? ' · ночная' : ''}</p>
+                </button>
+                <div class="order__prices">
+                  <div><span>Лак</span><b>${fmtPrice(o.totals?.lacquer, settings.currency)}</b></div>
+                  <div><span>Масло</span><b>${fmtPrice(o.totals?.oil, settings.currency)}</b></div>
+                </div>
+                <div class="order__actions">
+                  <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(o)}>Открыть</button>
+                  ${tel ? html`<a class="btn btn--ghost btn--sm" href=${'tel:+' + tel}>${Icon.phone()}<span>Позвонить</span></a>` : null}
+                  ${c.address ? html`<a class="btn btn--ghost btn--sm" target="_blank" rel="noopener"
+                    href=${'https://yandex.ru/maps/?text=' + encodeURIComponent(c.address)}>${Icon.pin()}<span>Карта</span></a>` : null}
+                  <span class="order__spacer"></span>
+                  <button type="button" class="icon-btn" title="Создать копию" aria-label="Создать копию" onClick=${() => onDuplicate(o)}>${Icon.dup()}</button>
+                  <button type="button" class="icon-btn" title="Удалить" aria-label="Удалить заказ" onClick=${() => onDelete(o)}>${Icon.trash()}</button>
+                </div>
+              </article>`;
+          })}
+        </div>
+      </section>
     </div>`;
 }
 
@@ -524,18 +580,20 @@ function TierTable({ title, hint, tiers, onChange }) {
   const sort = () => onChange((list) => { list.sort((a, b) => num(a.from) - num(b.from)); });
   const add = () => onChange((list) => {
     const last = sortedTiers(list).at(-1);
-    list.push({ id: uid(), from: last ? num(last.from) + (num(last.from) >= 5 ? 5 : 1) : 0, oil: last?.oil ?? 0, lacquer: last?.lacquer ?? 0 });
+    const from = last ? (String(last.to ?? '') !== '' ? num(last.to) : num(last.from) + 1) : 0;
+    list.push({ id: uid(), from, to: '', oil: last?.oil ?? 0, lacquer: last?.lacquer ?? 0 });
   });
   return html`
     <div class="tiers">
       <div class="tiers__title"><h3>${title}</h3><p>${hint}</p></div>
       <div class="tiers__grid">
-        <div class="tiers__row tiers__row--head"><span>Площадь от</span><span>Масло</span><span>Лак</span><span></span></div>
+        <div class="tiers__row tiers__row--head"><span>От, м²</span><span>До, м²</span><span>Масло, ₽</span><span>Лак, ₽</span><span></span></div>
         ${tiers.map((t) => html`
           <div class="tiers__row" key=${t.id}>
-            <${Num} decimal suffix="м²" aria="Площадь от" value=${t.from} onChange=${up(t.id, 'from')} onBlur=${sort} />
-            <${Num} group suffix="₽" aria="Масло, цена за м²" value=${t.oil} onChange=${up(t.id, 'oil')} />
-            <${Num} group suffix="₽" aria="Лак, цена за м²" value=${t.lacquer} onChange=${up(t.id, 'lacquer')} />
+            <${Num} decimal aria="Площадь от, м²" value=${t.from} onChange=${up(t.id, 'from')} onBlur=${sort} />
+            <${Num} decimal aria="Площадь до, м²" value=${t.to} placeholder="∞" onChange=${up(t.id, 'to')} />
+            <${Num} group aria="Масло, цена за м²" value=${t.oil} onChange=${up(t.id, 'oil')} />
+            <${Num} group aria="Лак, цена за м²" value=${t.lacquer} onChange=${up(t.id, 'lacquer')} />
             <button type="button" class="icon-btn" aria-label="Удалить диапазон" disabled=${tiers.length < 2}
               onClick=${() => onChange((list) => { const i = list.findIndex((x) => x.id === t.id); if (i >= 0) list.splice(i, 1); })}>${Icon.x()}</button>
           </div>`)}
@@ -545,24 +603,24 @@ function TierTable({ title, hint, tiers, onChange }) {
 }
 
 const CLOUD_TEXT = {
-  off: ['Облако не подключено', 'Цены и тексты хранятся в этом браузере. После настройки Firebase они будут одинаковыми на телефоне и компьютере.'],
+  off: ['Облако не подключено', 'Цены, тексты и заказы хранятся в этом браузере. После настройки Firebase они будут одинаковыми на телефоне и компьютере.'],
   init: ['Подключение…', 'Соединяюсь с Firebase.'],
-  signedOut: ['Войдите, чтобы синхронизировать', 'Цены и тексты будут сохраняться в вашем Firebase.'],
+  signedOut: ['Войдите, чтобы синхронизировать', 'Цены, тексты и заказы будут сохраняться в вашем Firebase.'],
   syncing: ['Синхронизация…', ''],
   synced: ['Синхронизировано', ''],
   error: ['Ошибка облака', ''],
 };
 
-function PricesPage({ settings, upSettings, cloud, toast, replaceSettings }) {
+function PricesPage({ settings, upSettings, cloud, toast, onImport, orders }) {
   const fileRef = useRef(null);
   const upTiers = (key) => (fn) => upSettings((s) => { fn(s.prices[key]); });
   const [title, text] = CLOUD_TEXT[cloud.status] || CLOUD_TEXT.off;
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ ...settings, orders }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `ceny-i-teksty-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `restavraciya-kopiya-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
@@ -573,8 +631,8 @@ function PricesPage({ settings, upSettings, cloud, toast, replaceSettings }) {
     try {
       const data = JSON.parse(await file.text());
       if (!data || typeof data !== 'object' || !data.prices) throw new Error('bad file');
-      replaceSettings(normalizeSettings(data));
-      toast('Цены и тексты загружены из файла');
+      onImport(data);
+      toast('Данные загружены из файла');
     } catch { toast('Файл не подошёл'); }
   };
 
@@ -583,13 +641,14 @@ function PricesPage({ settings, upSettings, cloud, toast, replaceSettings }) {
       <section class="section">
         <header class="section__head">
           <span class="section__no">01</span>
-          <div class="section__title"><h2>Цена за м²</h2><p>Диапазоны по площади: чем больше заказ, тем ниже ставка</p></div>
+          <div class="section__title"><h2>Цена за м²</h2><p>Для каждого диапазона площади — своя ставка</p></div>
         </header>
         <div class="card">
           <${TierTable} title="Поверхности" hint="Столешницы, столы, подоконники" tiers=${settings.prices.surfaces} onChange=${upTiers('surfaces')} />
           <hr class="rule" />
           <${TierTable} title="Лестница" hint="Ступени и площадки" tiers=${settings.prices.stairs} onChange=${upTiers('stairs')} />
           <hr class="rule" />
+          <p class="card__note">Пустое «до» — без верхней границы. Если площадь попала между диапазонами, берётся ближайший, а в итоге появится предупреждение.</p>
           <div class="setting">
             <div><h3>Диапазон выбирается по</h3><p>Какая площадь определяет ставку</p></div>
             <div class="seg">
@@ -604,6 +663,35 @@ function PricesPage({ settings, upSettings, cloud, toast, replaceSettings }) {
       <section class="section">
         <header class="section__head">
           <span class="section__no">02</span>
+          <div class="section__title"><h2>Правила цены</h2><p>Применяются к итогу автоматически</p></div>
+        </header>
+        <div class="card">
+          <div class="setting">
+            <div><h3>Разница между лаком и маслом</h3><p>Лак всегда не дешевле масла на эту сумму. 0 — не применять</p></div>
+            <${Num} cls="field--w" group suffix=${settings.currency} aria="Минимальная разница между лаком и маслом" value=${settings.minDiff}
+              onChange=${(v) => upSettings((s) => { s.minDiff = v; })} />
+          </div>
+          <hr class="rule" />
+          <div class="setting">
+            <div><h3>Минимальная стоимость заказа</h3><p>Ниже этой суммы цена не опускается. 0 — не применять</p></div>
+            <${Num} cls="field--w" group suffix=${settings.currency} aria="Минимальная стоимость заказа" value=${settings.minOrder}
+              onChange=${(v) => upSettings((s) => { s.minOrder = v; })} />
+          </div>
+          <hr class="rule" />
+          <div class="setting">
+            <div><h3>Округление цены</h3><p>Итог округляется до ближайшего значения</p></div>
+            <div class="chips">
+              ${[1, 50, 100, 500, 1000].map((v) => html`
+                <button type="button" class=${'chip chip--num' + (num(settings.rounding) === v ? ' is-on' : '')}
+                  onClick=${() => upSettings((s) => { s.rounding = v; })}>${v === 1 ? 'до рубля' : fmtInt(v)}</button>`)}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <header class="section__head">
+          <span class="section__no">03</span>
           <div class="section__title"><h2>Дополнительные услуги</h2><p>Цены подставляются в тексты по ключу в фигурных скобках</p></div>
         </header>
         <div class="card">
@@ -634,37 +722,21 @@ function PricesPage({ settings, upSettings, cloud, toast, replaceSettings }) {
 
       <section class="section">
         <header class="section__head">
-          <span class="section__no">03</span>
-          <div class="section__title"><h2>Расчёт</h2><p>Округление и значения по умолчанию</p></div>
+          <span class="section__no">04</span>
+          <div class="section__title"><h2>По умолчанию</h2><p>Подставляется в новые позиции и расчёты</p></div>
         </header>
         <div class="card">
-          <div class="setting">
-            <div><h3>Округление цены</h3><p>Итог округляется до ближайшего значения</p></div>
-            <div class="chips">
-              ${[1, 50, 100, 500, 1000].map((v) => html`
-                <button type="button" class=${'chip chip--num' + (num(settings.rounding) === v ? ' is-on' : '')}
-                  onClick=${() => upSettings((s) => { s.rounding = v; })}>${v === 1 ? 'до рубля' : fmtInt(v)}</button>`)}
-            </div>
-          </div>
-          <hr class="rule" />
-          <div class="setting">
-            <div><h3>Значения по умолчанию</h3><p>Подставляются в новые позиции и расчёты</p></div>
-            <div class="fields fields--tight">
-              <${Num} label="Ночной коэф." decimal suffix="×" value=${settings.nightK} onChange=${(v) => upSettings((s) => { s.nightK = v; })} />
-              <${Num} label="Толщина торца" suffix="мм" value=${settings.edgeThickness} onChange=${(v) => upSettings((s) => { s.edgeThickness = v; })} />
-              <label class="field">
-                <span class="field__label">Валюта</span>
-                <span class="field__box"><input type="text" value=${settings.currency} maxlength="6"
-                  onInput=${(e) => upSettings((s) => { s.currency = e.target.value; })} /></span>
-              </label>
-            </div>
+          <div class="fields fields--tight">
+            <${Num} label="Ночной коэф." decimal suffix="×" value=${settings.nightK} onChange=${(v) => upSettings((s) => { s.nightK = v; })} />
+            <${Num} label="Толщина торца" suffix="мм" value=${settings.edgeThickness} onChange=${(v) => upSettings((s) => { s.edgeThickness = v; })} />
+            <${Text} label="Валюта" value=${settings.currency} onChange=${(v) => upSettings((s) => { s.currency = v.slice(0, 6); })} />
           </div>
         </div>
       </section>
 
       <section class="section">
         <header class="section__head">
-          <span class="section__no">04</span>
+          <span class="section__no">05</span>
           <div class="section__title"><h2>Хранение</h2><p>Облако и резервная копия</p></div>
         </header>
         <div class="card">
@@ -682,7 +754,7 @@ function PricesPage({ settings, upSettings, cloud, toast, replaceSettings }) {
           </div>
           <hr class="rule" />
           <div class="setting">
-            <div><h3>Резервная копия</h3><p>Все цены и тексты одним файлом</p></div>
+            <div><h3>Резервная копия</h3><p>Цены, тексты и заказы одним файлом</p></div>
             <div class="btn-row">
               <button type="button" class="btn btn--ghost" onClick=${exportJson}>Скачать</button>
               <button type="button" class="btn btn--ghost" onClick=${() => fileRef.current?.click()}>Загрузить</button>
@@ -729,7 +801,7 @@ function TemplateEditor({ tpl, no, vars, upSettings, withUndoSettings, canDelete
       <div class="card editor">
         <div class="editor__col">
           <div class="chips chips--vars">
-            <span class="chips__label">Вставить цену</span>
+            <span class="chips__label">Вставить</span>
             ${Object.keys(vars).map((key) => html`
               <button type="button" class="chip chip--var" onClick=${() => insert(key)}>{${key}}</button>`)}
           </div>
@@ -760,7 +832,7 @@ function TextsPage({ settings, vars, upSettings, withUndoSettings }) {
 
 // ── Приложение ──────────────────────────────────────────────────
 
-const TABS = [['calc', 'Расчёт'], ['prices', 'Цены'], ['texts', 'Тексты']];
+const TABS = [['calc', 'Расчёт'], ['orders', 'Заказы'], ['prices', 'Цены'], ['texts', 'Тексты']];
 const THEMES = ['auto', 'light', 'dark'];
 const THEME_LABEL = { auto: 'Тема: как в системе', light: 'Тема: светлая', dark: 'Тема: тёмная' };
 const tabFromHash = () => (TABS.some(([id]) => '#' + id === location.hash) ? location.hash.slice(1) : 'calc');
@@ -768,14 +840,18 @@ const tabFromHash = () => (TABS.some(([id]) => '#' + id === location.hash) ? loc
 function App() {
   const [settings, setSettings] = useState(loadSettings);
   const [draft, setDraft] = useState(() => loadDraft(settings));
+  const [orders, setOrders] = useState(loadOrders);
   const [tab, setTab] = useState(tabFromHash);
   const [theme, setTheme] = useState(loadTheme);
   const [cloud, setCloud] = useState({ status: cloudConfigured ? 'init' : 'off', user: null });
   const [toastState, setToastState] = useState(null);
+  const [notice, setNotice] = useState(null);
   const settingsRef = useRef(settings);
+  const ordersRef = useRef(orders);
   const remoteAt = useRef(null);
   const toastTimer = useRef(null);
   settingsRef.current = settings;
+  ordersRef.current = orders;
 
   const upDraft = (fn) => setDraft((d) => { const n = structuredClone(d); fn(n); return n; });
   const upSettings = (fn) => setSettings((s) => { const n = structuredClone(s); fn(n); n.updatedAt = Date.now(); return n; });
@@ -788,10 +864,84 @@ function App() {
   };
   const withUndo = (msg) => { const prev = draft; toast(msg, () => setDraft(prev)); };
   const withUndoSettings = (msg) => { const prev = settings; toast(msg, () => replaceSettings(prev)); };
-  const onNew = () => { withUndo('Начат новый расчёт'); setDraft(defaultDraft(settings)); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const onNew = () => {
+    withUndo('Начат новый расчёт');
+    setNotice(null);
+    setDraft(defaultDraft(settings));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-  // Сохранение
+  const totals = useMemo(() => calcTotals(draft, settings), [draft, settings]);
+  const vars = useMemo(() => templateVars(totals, settings), [totals, settings]);
+
+  // ── Заказы ──
+  // Заказы записываются в память браузера сразу, не дожидаясь перерисовки.
+  const putOrder = (order) => {
+    const list = ordersRef.current;
+    const next = list.some((o) => o.id === order.id) ? list.map((o) => (o.id === order.id ? order : o)) : [order, ...list];
+    ordersRef.current = next;
+    saveOrders(next);
+    setOrders(next);
+    pushOrder(order).catch(() => {});
+  };
+  const saved = draft.id ? orders.find((o) => o.id === draft.id && !o.deleted) : null;
+  const dirty = useMemo(() => !saved || JSON.stringify(saved.draft) !== JSON.stringify(draft), [saved, draft]);
+
+  const onSave = (asNew) => {
+    const now = Date.now();
+    const id = asNew || !saved ? uid() + uid() : saved.id;
+    const d = { ...structuredClone(draft), id };
+    putOrder({
+      id, createdAt: asNew || !saved ? now : saved.createdAt, updatedAt: now, deleted: false, draft: d,
+      totals: { area: totals.area.total, lacquer: totals.price.lacquer.final, oil: totals.price.oil.final },
+    });
+    setDraft(d);
+    setNotice(null);
+    toast(asNew ? 'Сохранено как новый заказ' : 'Расчёт сохранён');
+  };
+  const onOpen = (order) => {
+    const d = normalizeDraft(order.draft, settings);
+    d.id = order.id;
+    const t = calcTotals(d, settings);
+    const was = order.totals || {};
+    setNotice(t.price.lacquer.final !== was.lacquer || t.price.oil.final !== was.oil ? { lacquer: was.lacquer, oil: was.oil } : null);
+    setDraft(d);
+    location.hash = '#calc';
+    window.scrollTo(0, 0);
+  };
+  const onNotice = (keep) => {
+    if (keep && notice) upDraft((d) => { d.manual = { lacquer: String(notice.lacquer), oil: String(notice.oil) }; });
+    setNotice(null);
+  };
+  const onDeleteOrder = (order) => {
+    putOrder({ ...order, deleted: true, updatedAt: Date.now() });
+    toast('Заказ удалён', () => putOrder({ ...order, deleted: false, updatedAt: Date.now() }));
+  };
+  const onDuplicateOrder = (order) => {
+    const now = Date.now(), id = uid() + uid();
+    const d = structuredClone(order.draft);
+    d.id = id;
+    d.client = { ...d.client, name: d.client?.name ? d.client.name + ' (копия)' : '' };
+    putOrder({ ...structuredClone(order), id, createdAt: now, updatedAt: now, draft: d });
+    toast('Создана копия заказа');
+  };
+  const onImport = (data) => {
+    const { orders: imported, ...rest } = data;
+    replaceSettings(normalizeSettings(rest));
+    if (Array.isArray(imported)) {
+      const map = new Map(ordersRef.current.map((o) => [o.id, o]));
+      for (const o of imported) {
+        if (!o?.id) continue;
+        const cur = map.get(o.id);
+        if (!cur || (o.updatedAt || 0) > (cur.updatedAt || 0)) { map.set(o.id, o); pushOrder(o).catch(() => {}); }
+      }
+      setOrders([...map.values()]);
+    }
+  };
+
+  // ── Сохранение ──
   useEffect(() => { saveDraft(draft); }, [draft]);
+  useEffect(() => { saveOrders(orders); }, [orders]);
   useEffect(() => {
     saveSettings(settings);
     if (!cloudConfigured || !cloud.user || settings.updatedAt === remoteAt.current) return;
@@ -801,7 +951,7 @@ function App() {
     return () => clearTimeout(t);
   }, [settings, cloud.user]);
 
-  // Облако
+  // ── Облако ──
   useEffect(() => {
     initCloud({
       onStatus: (st) => setCloud(st),
@@ -812,10 +962,24 @@ function App() {
         if (rAt > lAt) { remoteAt.current = rAt; setSettings(normalizeSettings(remote)); }
         else if (rAt < lAt) pushSettings(cur).catch(() => {});
       },
+      onRemoteOrders: (remote) => {
+        const local = ordersRef.current;
+        const map = new Map(local.map((o) => [o.id, o]));
+        const seen = new Set();
+        for (const r of remote) {
+          if (!r?.id) continue;
+          seen.add(r.id);
+          const l = map.get(r.id);
+          if (!l || (r.updatedAt || 0) > (l.updatedAt || 0)) map.set(r.id, r);
+          else if ((l.updatedAt || 0) > (r.updatedAt || 0)) pushOrder(l).catch(() => {});
+        }
+        for (const l of local) if (!seen.has(l.id)) pushOrder(l).catch(() => {});
+        setOrders([...map.values()]);
+      },
     });
   }, []);
 
-  // Навигация и тема
+  // ── Навигация и тема ──
   useEffect(() => {
     const onHash = () => { setTab(tabFromHash()); window.scrollTo(0, 0); };
     window.addEventListener('hashchange', onHash);
@@ -827,9 +991,8 @@ function App() {
     saveTheme(theme);
   }, [theme]);
 
-  const totals = useMemo(() => calcTotals(draft, settings), [draft, settings]);
-  const vars = useMemo(() => templateVars(totals, settings), [totals, settings]);
   const ThemeIcon = theme === 'auto' ? Icon.auto : theme === 'light' ? Icon.sun : Icon.moon;
+  const orderCount = orders.filter((o) => !o.deleted).length;
 
   return html`
     <header class="top">
@@ -844,7 +1007,7 @@ function App() {
         </a>
         <nav class="tabs" aria-label="Разделы">
           ${TABS.map(([id, label]) => html`
-            <a href=${'#' + id} class=${'tabs__btn' + (tab === id ? ' is-on' : '')} aria-current=${tab === id ? 'page' : null}>${label}</a>`)}
+            <a href=${'#' + id} class=${'tabs__btn' + (tab === id ? ' is-on' : '')} aria-current=${tab === id ? 'page' : null}>${label}${id === 'orders' && orderCount ? html`<sup>${orderCount}</sup>` : null}</a>`)}
         </nav>
         <div class="top__tools">
           ${cloudConfigured ? html`
@@ -859,9 +1022,13 @@ function App() {
     <main class="wrap">
       ${tab === 'calc' ? html`
         <${CalcPage} draft=${draft} settings=${settings} totals=${totals} vars=${vars}
-          upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast} onNew=${onNew} />` : null}
+          upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast} onNew=${onNew}
+          saved=${saved} dirty=${dirty} onSave=${onSave} notice=${notice} onNotice=${onNotice} />` : null}
+      ${tab === 'orders' ? html`
+        <${OrdersPage} orders=${orders} settings=${settings} currentId=${draft.id}
+          onOpen=${onOpen} onDelete=${onDeleteOrder} onDuplicate=${onDuplicateOrder} />` : null}
       ${tab === 'prices' ? html`
-        <${PricesPage} settings=${settings} upSettings=${upSettings} cloud=${cloud} toast=${toast} replaceSettings=${replaceSettings} />` : null}
+        <${PricesPage} settings=${settings} upSettings=${upSettings} cloud=${cloud} toast=${toast} onImport=${onImport} orders=${orders} />` : null}
       ${tab === 'texts' ? html`
         <${TextsPage} settings=${settings} vars=${vars} upSettings=${upSettings} withUndoSettings=${withUndoSettings} />` : null}
     </main>

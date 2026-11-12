@@ -28,11 +28,13 @@ export function defaultSettings() {
     v: 1,
     updatedAt: 0,
     prices: {
-      surfaces: [{ id: 't0', from: 0, oil: 14000, lacquer: 17000 }],
-      stairs: [{ id: 't0', from: 0, oil: 14000, lacquer: 17000 }],
+      surfaces: [{ id: 't0', from: 0, to: '', oil: 14000, lacquer: 17000 }],
+      stairs: [{ id: 't0', from: 0, to: '', oil: 14000, lacquer: 17000 }],
     },
     tierBy: 'total',      // 'total' — по всей площади заказа, 'section' — по площади раздела
     rounding: 100,
+    minDiff: 5000,        // лак не дешевле масла на эту сумму (0 — не применять)
+    minOrder: 0,          // минимальная стоимость заказа (0 — не применять)
     currency: '₽',
     nightK: 1.5,
     edgeThickness: 40,
@@ -47,7 +49,8 @@ export function defaultSettings() {
 export function newItem(kind, shape, settings) {
   return {
     id: uid(), shape, name: '',
-    l: '', w: '', d: '', a: '', b: '', h: '', area: '', edgeLen: '',
+    l: '', w: '', d: '', a: '', b: '', h: '', s1: '', s2: '', four: false,
+    area: '', edgeLen: '', pts: [],
     qty: 1,
     thickness: settings?.edgeThickness ?? 40,
     edges: {},
@@ -58,6 +61,9 @@ export function newItem(kind, shape, settings) {
 export function defaultDraft(settings) {
   return {
     v: 1,
+    id: null,
+    show: { surfaces: true, stairs: false },
+    client: { name: '', phone: '', address: '', note: '' },
     surfaces: [newItem('surfaces', 'rect', settings)],
     stairs: [],
     night: { on: false, k: settings?.nightK ?? 1.5 },
@@ -74,7 +80,7 @@ export function normalizeSettings(raw) {
   s.prices = { ...d.prices, ...(raw.prices || {}) };
   for (const k of ['surfaces', 'stairs']) {
     if (!Array.isArray(s.prices[k]) || !s.prices[k].length) s.prices[k] = d.prices[k];
-    s.prices[k] = s.prices[k].map((t) => ({ id: t.id || uid(), from: t.from ?? 0, oil: t.oil ?? 0, lacquer: t.lacquer ?? 0 }));
+    s.prices[k] = s.prices[k].map((t) => ({ id: t.id || uid(), from: t.from ?? 0, to: t.to ?? '', oil: t.oil ?? 0, lacquer: t.lacquer ?? 0 }));
   }
   if (!Array.isArray(s.services)) s.services = d.services;
   if (!Array.isArray(s.templates)) s.templates = d.templates;
@@ -87,6 +93,12 @@ export function normalizeDraft(raw, settings) {
   const fix = (list) => (Array.isArray(list) ? list : []).map((it) => ({ ...newItem('', it.shape || 'rect', settings), ...it }));
   return {
     ...d, ...raw,
+    id: raw.id || null,
+    // Старые расчёты без выбора разделов: лестница показывается, если в ней что-то есть.
+    show: raw.show
+      ? { surfaces: raw.show.surfaces !== false, stairs: !!raw.show.stairs }
+      : { surfaces: true, stairs: Array.isArray(raw.stairs) && raw.stairs.length > 0 },
+    client: { ...d.client, ...(raw.client || {}) },
     surfaces: fix(raw.surfaces),
     stairs: fix(raw.stairs),
     night: { ...d.night, ...(raw.night || {}) },

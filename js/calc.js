@@ -10,45 +10,102 @@ export function num(v) {
 
 export const COATS = ['oil', 'lacquer'];
 
+const dist = (p, q) => Math.hypot(q.x - p.x, q.y - p.y);
+
+/** Площадь многоугольника со знаком (формула шнурков), в единицах координат². */
+export function polyArea(pts) {
+  let s = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length];
+    s += p.x * q.y - q.x * p.y;
+  }
+  return s / 2;
+}
+
 /**
- * Грани (торцы) фигуры. Длины в мм.
- * Прямоугольник: t/b — длина, l/r — ширина.
- * Трапеция: l и r — параллельные стороны (A и B), t/b — боковые (равнобокая трапеция).
- * Круг: одна грань c — окружность.
+ * Контур фигуры в мм (x вправо, y вниз) и идентификаторы сторон.
+ * Сторона i идёт от точки i к точке i+1.
+ *   Прямоугольник: t/b — длина, l/r — ширина.
+ *   Трапеция: l и r — параллельные стороны A и B; t/b — боковые грани.
+ *     Обычный режим — длина (расстояние между A и B), трапеция равнобокая.
+ *     Режим «4 грани» — боковые грани s1 (верх) и s2 (низ) задаются отдельно.
+ *   Своя форма: точки, нарисованные в редакторе.
  */
-export function shapeSides(item) {
+export function shapeOutline(item) {
   switch (item.shape) {
     case 'rect': {
       const l = num(item.l), w = num(item.w);
-      return [
-        { id: 't', len: l }, { id: 'r', len: w },
-        { id: 'b', len: l }, { id: 'l', len: w },
-      ];
+      return {
+        pts: [{ x: 0, y: 0 }, { x: l, y: 0 }, { x: l, y: w }, { x: 0, y: w }],
+        ids: ['t', 'r', 'b', 'l'], valid: l > 0 && w > 0,
+      };
     }
     case 'trap': {
-      const a = num(item.a), b = num(item.b), h = num(item.h);
-      const leg = h > 0 ? Math.hypot(h, (a - b) / 2) : 0;
-      return [
-        { id: 't', len: leg }, { id: 'r', len: b },
-        { id: 'b', len: leg }, { id: 'l', len: a },
-      ];
+      const a = num(item.a), b = num(item.b);
+      const ids = ['t', 'r', 'b', 'l'];
+      if (item.four) {
+        const c = num(item.s1), d = num(item.s2), k = b - a;
+        let t = 0, h = 0;
+        if (Math.abs(k) < 1e-9) h = c > 0 && d > 0 ? (c + d) / 2 : 0;
+        else {
+          t = (d * d - c * c - k * k) / (2 * k);
+          const h2 = c * c - t * t;
+          h = h2 > 0 ? Math.sqrt(h2) : 0;
+        }
+        const valid = h > 0 && a + b > 0 && c > 0 && d > 0;
+        if (!valid) return { pts: [], ids, valid: false, filled: a + b > 0 && c > 0 && d > 0 };
+        return { pts: [{ x: 0, y: 0 }, { x: h, y: t }, { x: h, y: t + b }, { x: 0, y: a }], ids, valid };
+      }
+      const h = num(item.h), m = Math.max(a, b);
+      return {
+        pts: [{ x: 0, y: (m - a) / 2 }, { x: h, y: (m - b) / 2 }, { x: h, y: (m + b) / 2 }, { x: 0, y: (m + a) / 2 }],
+        ids, valid: h > 0 && m > 0,
+      };
     }
-    case 'circle':
-      return [{ id: 'c', len: Math.PI * num(item.d) }];
+    case 'poly': {
+      const pts = (item.pts || []).map((p) => ({ x: num(p.x), y: num(p.y) }));
+      return { pts, ids: pts.map((_, i) => String(i)), valid: pts.length >= 3 && Math.abs(polyArea(pts)) > 0 };
+    }
     default:
-      return [];
+      return { pts: [], ids: [], valid: false };
   }
+}
+
+/** Грани (торцы) фигуры: длина в мм и признак «учитывается». */
+export function shapeSides(item) {
+  if (item.shape === 'circle') return [{ id: 'c', len: Math.PI * num(item.d), on: !!item.edges?.c }];
+  const o = shapeOutline(item);
+  return o.ids.map((id, i) => ({
+    id,
+    len: o.pts.length ? dist(o.pts[i], o.pts[(i + 1) % o.pts.length]) : 0,
+    on: item.shape === 'poly' ? !!item.pts?.[i]?.e : !!item.edges?.[id],
+  }));
 }
 
 /** Площадь лицевой поверхности одной штуки, м². */
 export function faceArea(item) {
   switch (item.shape) {
-    case 'rect': return (num(item.l) * num(item.w)) / 1e6;
-    case 'trap': return ((num(item.a) + num(item.b)) / 2 * num(item.h)) / 1e6;
     case 'circle': { const d = num(item.d); return (Math.PI * d * d) / 4 / 1e6; }
     case 'custom': return num(item.area);
-    default: return 0;
+    default: {
+      const o = shapeOutline(item);
+      return o.valid ? Math.abs(polyArea(o.pts)) / 1e6 : 0;
+    }
   }
+}
+
+/** Изменить длину стороны i: соседняя сторона сдвигается параллельно себе (прямые углы сохраняются). */
+export function setSideLength(pts, i, length) {
+  const n = pts.length;
+  const a = pts[i], b = pts[(i + 1) % n];
+  const len = dist(a, b);
+  if (!(len > 0) || !(length > 0)) return pts;
+  const k = (length - len) / len;
+  const dx = (b.x - a.x) * k, dy = (b.y - a.y) * k;
+  const out = pts.map((p) => ({ ...p }));
+  const move = n > 3 ? [(i + 1) % n, (i + 2) % n] : [(i + 1) % n];
+  for (const j of move) { out[j].x = Math.round((out[j].x + dx) * 10) / 10; out[j].y = Math.round((out[j].y + dy) * 10) / 10; }
+  return out;
 }
 
 /** Полная геометрия позиции: лицевая площадь, кромка, итог с учётом количества. */
@@ -57,7 +114,7 @@ export function itemGeometry(item) {
   const face = faceArea(item) * (item.bothSides ? 2 : 1);
   const edgeLen = item.shape === 'custom'
     ? num(item.edgeLen)
-    : shapeSides(item).reduce((s, side) => s + (item.edges?.[side.id] ? side.len : 0), 0);
+    : shapeSides(item).reduce((s, side) => s + (side.on ? side.len : 0), 0);
   const edge = (edgeLen * num(item.thickness)) / 1e6;
   const unit = face + edge;
   return { qty, face, edgeLen, edge, unit, total: unit * qty };
@@ -67,29 +124,41 @@ export function sectionArea(items) {
   return (items || []).reduce((s, it) => s + itemGeometry(it).total, 0);
 }
 
+const isSet = (v) => v !== null && v !== undefined && String(v).trim() !== '';
+
 /** Диапазоны по возрастанию «от». */
 export function sortedTiers(tiers) {
   return [...(tiers || [])].sort((x, y) => num(x.from) - num(y.from));
 }
 
-/** Диапазон цены для площади: последний, у которого «от» ≤ площади. */
+/**
+ * Диапазон цены для площади. Сначала ищется диапазон, в который площадь попадает
+ * («от» ≤ площадь ≤ «до»; пустое «до» — без верхней границы). Если такого нет
+ * (площадь между диапазонами или за их пределами) — берётся ближайший, exact = false.
+ */
 export function pickTier(tiers, area) {
   const list = sortedTiers(tiers);
-  let hit = list[0] || null;
-  for (const t of list) if (num(t.from) <= area + 1e-9) hit = t;
-  return hit;
+  if (!list.length) return { tier: null, exact: true };
+  const eps = 1e-9;
+  const lo = (t) => num(t.from);
+  const hi = (t) => (isSet(t.to) ? num(t.to) : Infinity);
+  let hit = null;
+  for (const t of list) if (lo(t) <= area + eps && area <= hi(t) + eps) hit = t;
+  if (hit) return { tier: hit, exact: true };
+  let best = list[0], bestGap = Infinity;
+  for (const t of list) {
+    const gap = area < lo(t) ? lo(t) - area : area - hi(t);
+    if (gap < bestGap - eps) { best = t; bestGap = gap; }
+  }
+  return { tier: best, exact: false };
 }
 
-/** Подпись диапазона: «до 1 м²», «1–10 м²», «от 10 м²». */
-export function tierLabel(tiers, tier) {
-  const list = sortedTiers(tiers);
-  if (list.length < 2 || !tier) return '';
-  const i = list.indexOf(tier);
-  const from = fmtNum(num(tier.from));
-  const next = list[i + 1];
-  if (!next) return `от ${from} м²`;
-  const to = fmtNum(num(next.from));
-  return i === 0 && num(tier.from) === 0 ? `до ${to} м²` : `${from}–${to} м²`;
+/** Подпись диапазона: «0,1–0,9 м²», «от 3 м²», «до 1 м²». */
+export function tierLabel(tier) {
+  if (!tier) return '';
+  const from = num(tier.from), hasTo = isSet(tier.to);
+  if (hasTo) return from > 0 ? `${fmtNum(from)}–${fmtNum(tier.to)} м²` : `до ${fmtNum(tier.to)} м²`;
+  return from > 0 ? `от ${fmtNum(from)} м²` : '';
 }
 
 export function roundTo(value, step) {
@@ -97,13 +166,12 @@ export function roundTo(value, step) {
   return Math.round(value / s) * s;
 }
 
-const isSet = (v) => v !== null && v !== undefined && String(v).trim() !== '';
-
 /** Главный расчёт: площади, применённые ставки, итоговые цены. */
 export function calcTotals(draft, settings) {
+  const show = draft.show || { surfaces: true, stairs: true };
   const area = {
-    surfaces: sectionArea(draft.surfaces),
-    stairs: sectionArea(draft.stairs),
+    surfaces: show.surfaces ? sectionArea(draft.surfaces) : 0,
+    stairs: show.stairs ? sectionArea(draft.stairs) : 0,
   };
   area.total = area.surfaces + area.stairs;
 
@@ -111,7 +179,7 @@ export function calcTotals(draft, settings) {
   for (const key of ['surfaces', 'stairs']) {
     const tiers = settings.prices[key];
     const basis = settings.tierBy === 'section' ? area[key] : area.total;
-    const tier = pickTier(tiers, basis);
+    const { tier, exact } = pickTier(tiers, basis);
     const rate = {}, auto = {}, overridden = {};
     for (const c of COATS) {
       auto[c] = num(tier?.[c]);
@@ -119,20 +187,27 @@ export function calcTotals(draft, settings) {
       overridden[c] = isSet(ov);
       rate[c] = overridden[c] ? num(ov) : auto[c];
     }
-    sections[key] = { area: area[key], tier, label: tierLabel(tiers, tier), rate, auto, overridden };
+    sections[key] = {
+      area: area[key], tier, rate, auto, overridden,
+      label: tiers.length > 1 ? tierLabel(tier) : '',
+      exact: exact || basis <= 0,
+    };
   }
 
   const k = draft.night?.on ? Math.max(1, num(draft.night.k)) : 1;
+  const has = area.total > 0;
+  const minOrder = has ? num(settings.minOrder) : 0;
+  const minDiff = has ? num(settings.minDiff) : 0;
   const price = {};
+  // Масло считается первым: цена лака зависит от него (минимальная разница).
   for (const c of COATS) {
     const base = area.surfaces * sections.surfaces.rate[c] + area.stairs * sections.stairs.rate[c];
-    const autoPrice = roundTo(base * k, settings.rounding);
+    const calc = roundTo(base * k, settings.rounding);
+    let auto = calc, note = '';
+    if (auto < minOrder) { auto = minOrder; note = 'min'; }
+    if (c === 'lacquer' && minDiff > 0 && auto < price.oil.final + minDiff) { auto = price.oil.final + minDiff; note = 'diff'; }
     const manual = draft.manual?.[c];
-    price[c] = {
-      base, auto: autoPrice,
-      manual: isSet(manual),
-      final: isSet(manual) ? num(manual) : autoPrice,
-    };
+    price[c] = { base, calc, auto, note, manual: isSet(manual), final: isSet(manual) ? num(manual) : auto };
   }
   return { area, sections, k, price };
 }
