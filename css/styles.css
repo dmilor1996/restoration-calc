@@ -869,3 +869,80 @@ html.is-locked { overflow: hidden; }
   .norm__rate { font-size: 23px; }
   .section__head:has(.seg) { flex-wrap: wrap; }
 }
+
+
+/* ── Четвёртая версия: выбор режима, покрытие, разделение расчётов и выполненных ── */
+
+.calc-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.seg--mode .seg__btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; font-size: 15px; }
+.seg--mode .seg__btn svg { width: 18px; height: 18px; }
+.seg--mode .seg__btn.is-on svg { color: var(--accent); }
+.clear-btn {
+  display: inline-flex; flex-direction: row; align-items: center; gap: 8px; min-width: 0;
+  padding: 10px 16px; border-radius: 999px; font-size: 14.5px; color: var(--text);
+}
+.clear-btn svg { color: var(--accent); }
+
+.finish .setting { align-items: center; }
+.finish__one { font-size: 14px; color: var(--muted); margin-top: 12px; }
+.finish__one.is-warn { color: var(--accent); }
+.chips--mat { margin-top: 14px; }
+.chips--mat .chip i { font: 400 11.5px/1 var(--mono); opacity: .65; margin-left: 6px; }
+.chip--big { padding: 10px 18px; font-size: 15px; }
+.chip--big.is-on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+.price.is-picked { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.price__pick { font: 500 10px/1 var(--mono); color: var(--accent); background: var(--accent-soft); padding: 4px 7px; border-radius: 999px; margin-left: 8px; vertical-align: 2px; }
+
+/* Нормочас по выбранному покрытию */
+.norm__main { --tone: var(--muted); display: grid; gap: 2px; padding: 16px 18px; border-radius: 18px; background: var(--surface-2); border-left: 3px solid var(--tone); }
+.norm__main.is-good { --tone: var(--ok); }
+.norm__main.is-warn { --tone: #C58A1B; }
+.norm__main.is-bad { --tone: #C0392B; }
+.norm__main .norm__rate { font-size: 40px; }
+.norm__list { margin: 0; display: grid; gap: 6px; }
+.norm__list div { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; }
+.norm__list dt { color: var(--muted); }
+.norm__list dd { margin: 0; font-weight: 600; white-space: nowrap; }
+.norm__list .is-strong dt { color: var(--text); font-weight: 500; }
+.norm__list .is-strong dd { color: var(--ok); font-size: 17px; }
+.norm__list--floor { padding-top: 12px; border-top: 1px solid var(--line); }
+.norm__other { font-size: 13.5px; color: var(--muted); }
+.norm__other b { color: var(--text); font-weight: 600; }
+
+/* Клиент: блок «выполнено» */
+.client__status.is-done { color: var(--ok); }
+.client__done { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; padding-top: 18px; border-top: 1px solid var(--line); }
+.client__done h3 { font-size: 16px; font-weight: 600; }
+.client__done p { font-size: 13px; color: var(--muted); max-width: 46ch; }
+
+/* Заказы: расчёты и выполненные */
+.seg--tabs { display: flex; width: 100%; }
+.seg--tabs .seg__btn { flex: 1; text-align: center; padding: 11px 12px; font-size: 15.5px; }
+.seg--tabs sup { font: 500 10.5px/1 var(--mono); color: var(--muted); margin-left: 6px; vertical-align: 5px; }
+.seg--tabs .is-on sup { color: var(--accent); }
+.order.is-done { border-left: 3px solid var(--ok); }
+.order.is-done .order__prices { grid-template-columns: repeat(3, auto); gap: 8px 22px; }
+
+/* Форма факта */
+.fact__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.fact__head .eyebrow { margin-top: 0; }
+
+@media (max-width: 720px) {
+  .calc-top { flex-wrap: nowrap; }
+  .seg--mode .seg__btn { padding: 9px 12px; font-size: 14.5px; }
+  .seg--mode .seg__btn svg { display: none; }
+  .clear-btn { padding: 9px 13px; font-size: 14px; flex: none; }
+  .finish .setting > .seg { width: 100%; }
+  .finish .setting > .seg .seg__btn { flex: 1; text-align: center; }
+  .order.is-done .order__prices { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .norm__main .norm__rate { font-size: 34px; }
+  .client__done .btn { width: 100%; }
+}
+
+@media (max-width: 720px) {
+  .seg--mode { flex: 1 1 0; min-width: 0; display: flex; }
+  .seg--mode .seg__btn { flex: 1; min-width: 0; padding: 9px 8px; text-align: center; font-size: 14px; }
+  .clear-btn { padding: 9px 12px; gap: 6px; font-size: 13.5px; }
+  .order__actions .btn--fact span { display: inline; }
+}

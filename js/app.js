@@ -1,6 +1,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from './vendor/preact-htm.js';
 import {
   num, itemGeometry, shapeSides, shapeOutline, sectionArea, calcTotals, calcCost, travelPlan, factSummary, sortedTiers,
+  materialsOfKind, pickMaterial, materialCostPerM2,
   templateVars, templateParts, usedKeys, normKey,
   fmtArea, fmtInt, fmtNum, fmtPrice, plural,
 } from './calc.js';
@@ -231,28 +232,78 @@ function Section({ no, kind, items, settings, upDraft, withUndo, onEditPoly }) {
     </section>`;
 }
 
-// ── Выбор разделов ──────────────────────────────────────────────
+// ── Что считаем: поверхности или лестница ────────────────────────
 
-function Modes({ draft, settings, upDraft }) {
-  const toggle = (key) => upDraft((d) => {
-    const other = key === 'surfaces' ? 'stairs' : 'surfaces';
-    const next = !d.show[key];
-    d.show[key] = next;
-    if (!next && !d.show[other]) d.show[other] = true;
-    for (const k of ['surfaces', 'stairs']) {
-      if (d.show[k] && !d[k].length) d[k].push(newItem(k, 'rect', settings));
-    }
+function ModeSwitch({ draft, settings, upDraft }) {
+  const pick = (key) => upDraft((d) => {
+    d.mode = key;
+    if (!d[key].length) d[key].push(newItem(key, 'rect', settings));
   });
   return html`
-    <div class="modes" role="group" aria-label="Что считаем">
+    <div class="seg seg--mode" role="radiogroup" aria-label="Что считаем">
       ${['surfaces', 'stairs'].map((key) => html`
-        <button type="button" class=${'mode' + (draft.show[key] ? ' is-on' : '')} aria-pressed=${draft.show[key] ? 'true' : 'false'}
-          onClick=${() => toggle(key)}>
-          <span class="mode__icon">${Icon[KINDS[key].icon]()}</span>
-          <span class="mode__text"><b>${KINDS[key].title}</b><i>${KINDS[key].hint}</i></span>
-          <span class="mode__check">${Icon.check()}</span>
+        <button type="button" role="radio" aria-checked=${draft.mode === key ? 'true' : 'false'}
+          class=${'seg__btn' + (draft.mode === key ? ' is-on' : '')} onClick=${() => pick(key)}>
+          ${Icon[KINDS[key].icon]()}<span>${KINDS[key].title}</span>
         </button>`)}
     </div>`;
+}
+
+// ── Покрытие: что было, чем покрываем, покраска ──────────────────
+
+function Finish({ no, draft, settings, upDraft }) {
+  const cost = settings.cost, cur = settings.currency;
+  const coat = draft.coat === 'lacquer' ? 'lacquer' : 'oil';
+  const list = materialsOfKind(cost, coat);
+  const sel = pickMaterial(cost, coat, draft.finish?.[coat]);
+  const stainList = materialsOfKind(cost, 'stain');
+  const stainSel = pickMaterial(cost, 'stain', draft.stain?.id);
+  const stainOn = !!draft.stain?.on;
+  const k = num(cost.time.sandLacquerK);
+  const matChips = (items, selId, onPick) => html`
+    <div class="chips chips--mat">
+      ${items.map((m) => html`
+        <button type="button" key=${m.id} class=${'chip' + (selId === m.id ? ' is-on' : '')} aria-pressed=${selId === m.id ? 'true' : 'false'}
+          onClick=${() => onPick(m.id)}>${m.name || 'Материал'} <i>${fmtInt(materialCostPerM2(m))} ${cur}/м²</i></button>`)}
+    </div>`;
+  return html`
+    <section class="section">
+      <header class="section__head">
+        <span class="section__no">${no}</span>
+        <div class="section__title"><h2>Покрытие</h2><p>От этого зависят время, материалы и ваша прибыль</p></div>
+      </header>
+      <div class="card finish">
+        <div class="setting">
+          <div><h3>Сейчас на поверхности</h3>
+            <p>${k > 1 ? `Старый лак шлифуется в ${fmtNum(k)} раза дольше масла` : 'От этого зависит время шлифовки'}</p></div>
+          <div class="seg">
+            ${[['oil', 'Масло'], ['lacquer', 'Лак']].map(([v, l]) => html`
+              <button type="button" class=${'seg__btn' + (draft.current === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.current = v; })}>${l}</button>`)}
+          </div>
+        </div>
+        <hr class="rule" />
+        <div class="setting">
+          <div><h3>Покрываем</h3><p>Для чего считаем себестоимость и прибыль</p></div>
+          <div class="seg">
+            ${[['oil', 'Масло-воск'], ['lacquer', 'Лак']].map(([v, l]) => html`
+              <button type="button" class=${'seg__btn' + (coat === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.coat = v; })}>${l}</button>`)}
+          </div>
+        </div>
+        ${list.length > 1 ? matChips(list, sel?.id, (id) => upDraft((d) => { d.finish[coat] = id; }))
+          : list.length === 1 ? html`<p class="finish__one">${list[0].name || 'Материал'} · ${fmtInt(materialCostPerM2(list[0]))} ${cur}/м²</p>`
+          : html`<p class="finish__one is-warn">Нет материала для этого покрытия — добавьте его в «Настройки → Себестоимость».</p>`}
+        <hr class="rule" />
+        <div class="setting">
+          <div><h3>Покраска морилкой</h3>
+            <p>${stainOn ? `Добавляется ${fmtInt(cost.stainPrice)} ${cur}/м², а время и материал идут в себестоимость` : 'Включите, если красите перед покрытием'}</p></div>
+          <button type="button" class=${'chip chip--big' + (stainOn ? ' is-on' : '')} aria-pressed=${stainOn ? 'true' : 'false'}
+            onClick=${() => upDraft((d) => { d.stain.on = !d.stain.on; })}>${stainOn ? 'Покраска включена' : 'Покраска'}</button>
+        </div>
+        ${stainOn ? (stainList.length > 1 ? matChips(stainList, stainSel?.id, (id) => upDraft((d) => { d.stain.id = id; }))
+          : stainList.length === 1 ? html`<p class="finish__one">${stainList[0].name || 'Морилка'} · ${fmtInt(materialCostPerM2(stainList[0]))} ${cur}/м²</p>`
+          : html`<p class="finish__one is-warn">Нет материала-морилки — добавьте его в «Настройки → Себестоимость», иначе её стоимость не посчитается.</p>`) : null}
+      </div>
+    </section>`;
 }
 
 // ── Дополнительно: услуги, выезд, ночная работа ─────────────────
@@ -322,11 +373,14 @@ function Extras({ no, draft, settings, upDraft }) {
 
 // ── Клиент и сохранение ─────────────────────────────────────────
 
-function ClientSection({ no, draft, upDraft, saved, dirty, onSave }) {
+function ClientSection({ no, draft, upDraft, saved, dirty, onSave, onDone }) {
   const c = draft.client;
   const set = (key) => (v) => upDraft((d) => { d.client[key] = v; });
-  const status = !saved ? 'Расчёт ещё не сохранён'
-    : dirty ? 'Есть несохранённые изменения' : `Сохранён ${fmtDateTime(saved.updatedAt)}`;
+  const done = !!saved?.fact;
+  const status = !saved ? 'Расчёт не сохранён'
+    : dirty ? (done ? 'Заказ выполнен · есть несохранённые изменения' : 'Есть несохранённые изменения')
+    : done ? 'Заказ выполнен · учтён в статистике'
+    : `Расчёт сохранён ${fmtDateTime(saved.updatedAt)} · в статистику не входит`;
   return html`
     <section class="section">
       <header class="section__head">
@@ -344,13 +398,19 @@ function ClientSection({ no, draft, upDraft, saved, dirty, onSave }) {
           </label>
         </div>
         <div class="client__foot">
-          <span class=${'client__status' + (saved && !dirty ? ' is-ok' : '')}>${status}</span>
+          <span class=${'client__status' + (done && !dirty ? ' is-done' : '')}>${status}</span>
           <div class="btn-row">
             ${saved ? html`<button type="button" class="btn btn--ghost" onClick=${() => onSave(true)}>Сохранить как новый</button>` : null}
-            <button type="button" class="btn btn--primary" disabled=${!!saved && !dirty} onClick=${() => onSave(false)}>
+            <button type="button" class=${'btn ' + (saved && !dirty ? 'btn--ghost' : 'btn--primary')} disabled=${!!saved && !dirty} onClick=${() => onSave(false)}>
               ${Icon.save()}<span>${saved ? 'Сохранить изменения' : 'Сохранить расчёт'}</span>
             </button>
           </div>
+        </div>
+        <div class="client__done">
+          <div><h3>${done ? 'Заказ выполнен' : 'Работа сделана?'}</h3>
+            <p>${done ? 'Факт можно поправить или убрать из статистики' : 'Укажите, сколько получили и сколько времени ушло — заказ попадёт в статистику'}</p></div>
+          <button type="button" class=${'btn ' + (done ? 'btn--ghost' : 'btn--done')} onClick=${onDone}>
+            ${Icon.check()}<span>${done ? 'Факт и статистика' : 'Заказ выполнен'}</span></button>
         </div>
       </div>
     </section>`;
@@ -358,13 +418,13 @@ function ClientSection({ no, draft, upDraft, saved, dirty, onSave }) {
 
 // ── Итог ────────────────────────────────────────────────────────
 
-function PriceTile({ coat, price, value, onChange, settings }) {
+function PriceTile({ coat, price, value, onChange, settings, picked }) {
   const tag = price.note === 'diff' ? `не ниже масла + ${fmtInt(settings.minDiff)}`
     : price.note === 'min' ? 'минимальный заказ' : 'расчёт';
   return html`
-    <div class=${'price' + (price.manual ? ' is-manual' : '')}>
+    <div class=${'price' + (price.manual ? ' is-manual' : '') + (picked ? ' is-picked' : '')}>
       <div class="price__head">
-        <span class="price__label">${COAT_LABEL[coat]}</span>
+        <span class="price__label">${COAT_LABEL[coat]}${picked ? html`<i class="price__pick">выбрано</i>` : null}</span>
         ${price.manual
           ? html`<button type="button" class="price__reset" onClick=${() => onChange('')} title="Вернуть расчётную цену">
               ${Icon.reset()}<span>расчёт ${fmtInt(price.auto)}</span></button>`
@@ -376,7 +436,7 @@ function PriceTile({ coat, price, value, onChange, settings }) {
 }
 
 function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) {
-  const rows = [['surfaces', 'Поверхности'], ['stairs', 'Лестница']].filter(([key]) => draft.show[key]);
+  const rows = [['surfaces', 'Поверхности'], ['stairs', 'Лестница']].filter(([key]) => draft.mode === key);
   const setRate = (key, coat) => (v) => upDraft((d) => { d.rates[key][coat] = v; });
   const offRange = rows.some(([key]) => !totals.sections[key].exact);
 
@@ -407,6 +467,10 @@ function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) 
           <div class="rates__row rates__row--note">
             <span class="rates__name">Ночная работа</span><span></span><span class="rates__k">×${fmtNum(totals.k)}</span>
           </div>` : null}
+        ${totals.stain ? html`
+          <div class="rates__row rates__row--note">
+            <span class="rates__name">Покраска</span><span></span><span class="rates__k">+${fmtInt(totals.stain)}</span>
+          </div>` : null}
         ${totals.travel ? html`
           <div class="rates__row rates__row--note">
             <span class="rates__name">Выезд</span><span></span><span class="rates__k">+${fmtInt(totals.travel)}</span>
@@ -425,7 +489,7 @@ function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) 
 
       <div class="prices">
         ${['lacquer', 'oil'].map((c) => html`
-          <${PriceTile} key=${c} coat=${c} price=${totals.price[c]} settings=${settings}
+          <${PriceTile} key=${c} coat=${c} price=${totals.price[c]} settings=${settings} picked=${draft.coat === c}
             value=${draft.manual[c]} onChange=${(v) => upDraft((d) => { d.manual[c] = v; })} />`)}
       </div>
       <p class="total__note">Нажмите на цену или ставку, чтобы указать свою. Пустое поле — расчёт по прайсу.</p>
@@ -477,7 +541,7 @@ function TemplateCard({ tpl, vars, settings, upSettings, toast, phone }) {
 
 // ── Страница «Расчёт» ───────────────────────────────────────────
 
-function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, upDraft, upSettings, withUndo, toast, onNew, saved, dirty, onSave, notice, onNotice }) {
+function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, upDraft, upSettings, withUndo, toast, onNew, saved, dirty, onSave, onDone, notice, onNotice }) {
   const summaryRef = useRef(null);
   const [barHidden, setBarHidden] = useState(false);
   const [polyEdit, setPolyEdit] = useState(null);
@@ -490,7 +554,6 @@ function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, u
     return () => io.disconnect();
   }, []);
 
-  const shown = ['surfaces', 'stairs'].filter((k) => draft.show[k]);
   const no = (i) => String(i + 1).padStart(2, '0');
   const editItem = polyEdit ? draft[polyEdit.kind].find((x) => x.id === polyEdit.id) : null;
   const onEditPoly = (kind, id) => setPolyEdit({ kind, id });
@@ -499,16 +562,16 @@ function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, u
     <div class="layout">
       <div class="layout__main">
         <div class="calc-top">
-          <${Modes} draft=${draft} settings=${settings} upDraft=${upDraft} />
+          <${ModeSwitch} draft=${draft} settings=${settings} upDraft=${upDraft} />
           <button type="button" class="clear-btn" onClick=${onNew} title="Очистить всё и начать новый расчёт">
             ${Icon.reset()}<span>Очистить всё</span>
           </button>
         </div>
-        ${shown.map((kind, i) => html`
-          <${Section} key=${kind} no=${no(i)} kind=${kind} items=${draft[kind]} settings=${settings}
-            upDraft=${upDraft} withUndo=${withUndo} onEditPoly=${onEditPoly} />`)}
-        <${Extras} no=${no(shown.length)} draft=${draft} settings=${settings} upDraft=${upDraft} />
-        <${ClientSection} no=${no(shown.length + 1)} draft=${draft} upDraft=${upDraft} saved=${saved} dirty=${dirty} onSave=${onSave} />
+        <${Section} key=${draft.mode} no="01" kind=${draft.mode} items=${draft[draft.mode]} settings=${settings}
+          upDraft=${upDraft} withUndo=${withUndo} onEditPoly=${onEditPoly} />
+        <${Finish} no="02" draft=${draft} settings=${settings} upDraft=${upDraft} />
+        <${Extras} no="03" draft=${draft} settings=${settings} upDraft=${upDraft} />
+        <${ClientSection} no="04" draft=${draft} upDraft=${upDraft} saved=${saved} dirty=${dirty} onSave=${onSave} onDone=${onDone} />
       </div>
 
       <aside class="layout__aside" id="summary" ref=${summaryRef}>
@@ -541,85 +604,92 @@ function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, u
 
 function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate, onFact }) {
   const [q, setQ] = useState('');
-  const [show, setShow] = useState('all');
+  const live = orders.filter((o) => !o.deleted);
+  const doneCount = live.filter((o) => o.fact).length;
+  const quoteCount = live.length - doneCount;
+  const [view, setView] = useState(() => (quoteCount === 0 && doneCount > 0 ? 'done' : 'quotes'));
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return orders
-      .filter((o) => !o.deleted)
-      .filter((o) => show === 'all' || (show === 'done') === !!o.fact)
+    return live
+      .filter((o) => (view === 'done') === !!o.fact)
       .filter((o) => {
         if (!needle) return true;
         const c = o.draft?.client || {};
         return [c.name, c.phone, c.address, c.note].some((v) => String(v || '').toLowerCase().includes(needle));
       })
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }, [orders, q, show]);
-  const total = orders.filter((o) => !o.deleted).length;
-  const doneCount = orders.filter((o) => !o.deleted && o.fact).length;
+      .sort((a, b) => (view === 'done' ? String(b.fact.date || '').localeCompare(String(a.fact.date || '')) : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  }, [orders, q, view]);
+  const inView = view === 'done' ? doneCount : quoteCount;
 
   return html`
     <div class="page">
       <section class="section">
         <header class="section__head">
           <div class="section__title"><h2>Заказы</h2>
-            <p>${total ? `${total} ${plural(total, ['сохранённый расчёт', 'сохранённых расчёта', 'сохранённых расчётов'])}` : 'Сохранённые расчёты с данными клиентов'}</p></div>
+            <p>${view === 'done' ? 'Выполненные заказы — из них считается статистика' : 'Сохранённые расчёты. В статистику не входят, пока заказ не отмечен выполненным'}</p></div>
         </header>
 
-        ${doneCount ? html`
-          <div class="seg seg--fit">
-            ${[['all', 'Все'], ['open', 'В работе'], ['done', 'Выполненные']].map(([v, l]) => html`
-              <button type="button" class=${'seg__btn' + (show === v ? ' is-on' : '')} onClick=${() => setShow(v)}>${l}</button>`)}
-          </div>` : null}
-        ${total > 3 ? html`
+        <div class="seg seg--tabs" role="tablist">
+          <button type="button" role="tab" aria-selected=${view === 'quotes' ? 'true' : 'false'} class=${'seg__btn' + (view === 'quotes' ? ' is-on' : '')} onClick=${() => setView('quotes')}>
+            Расчёты<sup>${quoteCount}</sup></button>
+          <button type="button" role="tab" aria-selected=${view === 'done' ? 'true' : 'false'} class=${'seg__btn' + (view === 'done' ? ' is-on' : '')} onClick=${() => setView('done')}>
+            Выполненные<sup>${doneCount}</sup></button>
+        </div>
+
+        ${inView > 3 ? html`
           <label class="field search">
             <span class="field__box">${Icon.search()}<input type="search" value=${q} placeholder="Имя, телефон или адрес"
               aria-label="Поиск по заказам" onInput=${(e) => setQ(e.target.value)} /></span>
           </label>` : null}
 
-        ${!total ? html`
+        ${!inView ? html`
           <div class="card empty">
-            <h3>Пока пусто</h3>
-            <p>На вкладке «Расчёт» заполните блок «Клиент» и нажмите «Сохранить расчёт» — он появится здесь со всеми размерами и ценами.</p>
+            <h3>${view === 'done' ? 'Выполненных заказов пока нет' : 'Сохранённых расчётов пока нет'}</h3>
+            <p>${view === 'done'
+              ? 'Откройте сохранённый расчёт и нажмите «Заказ выполнен» — он перейдёт сюда и попадёт в статистику.'
+              : 'На вкладке «Расчёт» заполните блок «Клиент» и нажмите «Сохранить расчёт» — он появится здесь со всеми размерами и ценами.'}</p>
             <a class="btn btn--primary" href="#calc">К расчёту</a>
           </div>` : null}
-        ${total && !list.length ? html`<p class="lead">Ничего не найдено.</p>` : null}
+        ${inView && !list.length ? html`<p class="lead">Ничего не найдено.</p>` : null}
 
         <div class="orders">
           ${list.map((o) => {
             const c = o.draft?.client || {};
             const tel = phoneDigits(c.phone);
             const fs = factSummary(o);
-            const count = ['surfaces', 'stairs'].filter((k) => o.draft?.show?.[k] !== false)
-              .reduce((s, k) => s + (o.draft?.[k]?.length || 0), 0);
+            const mode = o.draft?.mode || (o.draft?.show?.stairs && !o.draft?.show?.surfaces ? 'stairs' : 'surfaces');
+            const count = o.draft?.[mode]?.length || 0;
             return html`
-              <article class=${'card order' + (o.id === currentId ? ' is-current' : '')} key=${o.id}>
+              <article class=${'card order' + (o.id === currentId ? ' is-current' : '') + (fs ? ' is-done' : '')} key=${o.id}>
                 <button type="button" class="order__main" onClick=${() => onOpen(o)}>
                   <div class="order__title">
                     <h3>${c.name || c.address || 'Без имени'}</h3>
                     ${o.id === currentId ? html`<span class="order__badge">открыт</span>` : null}
-                    ${o.fact ? html`<span class="order__badge order__badge--done">выполнен</span>` : null}
                   </div>
                   ${c.name && c.address ? html`<p class="order__addr">${c.address}</p>` : null}
                   ${c.note ? html`<p class="order__note">${c.note}</p>` : null}
-                  <p class="order__meta">${fmtDate(o.updatedAt)} · ${fmtArea(o.totals?.area)} м² · ${count} ${plural(count, ['позиция', 'позиции', 'позиций'])}${o.draft?.night?.on ? ' · ночная' : ''}</p>
+                  <p class="order__meta">${fs
+                    ? `Выполнен ${fmtDate(new Date(o.fact.date || o.updatedAt).getTime())} · ${fmtArea(fs.area)} м² · ${fmtNum(fs.hours, 1)} ч${fs.byStages ? '' : ' (общее время)'}`
+                    : `${fmtDate(o.updatedAt)} · ${fmtArea(o.totals?.area)} м² · ${count} ${plural(count, ['позиция', 'позиции', 'позиций'])}${o.draft?.night?.on ? ' · ночная' : ''}`}</p>
                 </button>
                 ${fs ? html`
                   <div class="order__prices">
                     <div><span>Получено</span><b>${fmtPrice(fs.received, settings.currency)}</b></div>
-                    <div><span>Ваш час</span><b>${fmtPrice(fs.rate, settings.currency)}</b></div>
+                    <div><span>Прибыль</span><b>${fmtPrice(fs.profit, settings.currency)}</b></div>
+                    <div><span>Ваш час</span><b>${fs.hours > 0 ? fmtPrice(fs.rate, settings.currency) : '—'}</b></div>
                   </div>` : html`
                   <div class="order__prices">
                     <div><span>Лак</span><b>${fmtPrice(o.totals?.lacquer, settings.currency)}</b></div>
                     <div><span>Масло</span><b>${fmtPrice(o.totals?.oil, settings.currency)}</b></div>
                   </div>`}
                 <div class="order__actions">
-                  <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(o)}>Открыть</button>
-                  <button type="button" class=${'btn btn--sm ' + (o.fact ? 'btn--ghost' : 'btn--done')} onClick=${() => onFact(o)}>${Icon.check()}<span>${o.fact ? 'Факт' : 'Выполнен'}</span></button>
+                  <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(o)}>Открыть расчёт</button>
+                  <button type="button" class=${'btn btn--sm btn--fact ' + (fs ? 'btn--ghost' : 'btn--done')} onClick=${() => onFact(o)}>${Icon.check()}<span>${fs ? 'Факт' : 'Заказ выполнен'}</span></button>
                   ${tel ? html`<a class="btn btn--ghost btn--sm" href=${'tel:+' + tel}>${Icon.phone()}<span>Позвонить</span></a>` : null}
                   ${c.address ? html`<a class="btn btn--ghost btn--sm" target="_blank" rel="noopener"
                     href=${'https://yandex.ru/maps/?text=' + encodeURIComponent(c.address)}>${Icon.pin()}<span>Карта</span></a>` : null}
                   <span class="order__spacer"></span>
-                  <button type="button" class="icon-btn" title="Создать копию" aria-label="Создать копию" onClick=${() => onDuplicate(o)}>${Icon.dup()}</button>
+                  <button type="button" class="icon-btn" title="Создать копию расчёта" aria-label="Создать копию" onClick=${() => onDuplicate(o)}>${Icon.dup()}</button>
                   <button type="button" class="icon-btn" title="Удалить" aria-label="Удалить заказ" onClick=${() => onDelete(o)}>${Icon.trash()}</button>
                 </div>
               </article>`;
@@ -773,6 +843,12 @@ function PricesPage({ settings, upSettings, cloud, toast, onImport, orders }) {
           <button type="button" class="adder adder--sm"
             onClick=${() => upSettings((st) => { st.services.push({ id: uid(), key: '', name: '', price: 0 }); })}>
             <span>Услуга</span>${Icon.plus()}</button>
+          <hr class="rule" />
+          <div class="setting">
+            <div><h3>Покраска морилкой</h3><p>Цена за м², прибавляется к покрытию, когда в расчёте включена «Покраска»</p></div>
+            <${Num} cls="field--w" group suffix=${settings.currency + '/м²'} aria="Цена покраски за м²" value=${settings.cost.stainPrice}
+              onChange=${(v) => upSettings((s) => { s.cost.stainPrice = v; })} />
+          </div>
         </div>
       </section>
 
@@ -963,18 +1039,27 @@ function App() {
   const saved = draft.id ? orders.find((o) => o.id === draft.id && !o.deleted) : null;
   const dirty = useMemo(() => !saved || JSON.stringify(saved.draft) !== JSON.stringify(draft), [saved, draft]);
 
-  const onSave = (asNew) => {
+  // Сохраняет расчёт. Факт выполнения (статистика) при обычном сохранении не теряется, при «как новый» — не копируется.
+  const persist = (asNew) => {
     const now = Date.now();
-    const id = asNew || !saved ? uid() + uid() : saved.id;
+    const fresh = asNew || !saved;
+    const id = fresh ? uid() + uid() : saved.id;
     const d = { ...structuredClone(draft), id };
-    putOrder({
-      id, createdAt: asNew || !saved ? now : saved.createdAt, updatedAt: now, deleted: false, draft: d,
+    const order = {
+      id, createdAt: fresh ? now : saved.createdAt, updatedAt: now, deleted: false, draft: d,
       totals: { area: totals.area.total, lacquer: totals.price.lacquer.final, oil: totals.price.oil.final },
-    });
+      fact: fresh ? null : (saved.fact || null),
+    };
+    putOrder(order);
     setDraft(d);
     setNotice(null);
-    toast(asNew ? 'Сохранено как новый заказ' : 'Расчёт сохранён');
+    return order;
   };
+  const onSave = (asNew) => {
+    persist(asNew);
+    toast(asNew ? 'Сохранено как новый расчёт' : 'Расчёт сохранён');
+  };
+  const onDone = () => setFactOrder(saved && !dirty ? saved : persist(false));
   const onOpen = (order) => {
     const d = normalizeDraft(order.draft, settings);
     d.id = order.id;
@@ -999,18 +1084,18 @@ function App() {
     d.id = id;
     d.client = { ...d.client, name: d.client?.name ? d.client.name + ' (копия)' : '' };
     putOrder({ ...structuredClone(order), id, createdAt: now, updatedAt: now, draft: d, fact: null });
-    toast('Создана копия заказа');
+    toast('Создана копия расчёта');
   };
   const onFactSave = (fact) => {
     putOrder({ ...factOrder, fact, updatedAt: Date.now() });
     setFactOrder(null);
-    toast('Заказ отмечен выполненным');
+    toast('Заказ выполнен и учтён в статистике');
   };
   const onFactReopen = () => {
     const { fact, ...rest } = factOrder;
     putOrder({ ...rest, fact: null, updatedAt: Date.now() });
     setFactOrder(null);
-    toast('Заказ возвращён в работу');
+    toast('Заказ убран из статистики и вернулся в расчёты');
   };
   const onImport = (data) => {
     const { orders: imported, ...rest } = data;
@@ -1110,7 +1195,7 @@ function App() {
       ${tab === 'calc' ? html`
         <${CalcPage} draft=${draft} settings=${settings} totals=${totals} vars=${vars} cost=${cost} hideCost=${hideCost} onHideCost=${onHideCost}
           upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast} onNew=${onNew}
-          saved=${saved} dirty=${dirty} onSave=${onSave} notice=${notice} onNotice=${onNotice} />` : null}
+          saved=${saved} dirty=${dirty} onSave=${onSave} onDone=${onDone} notice=${notice} onNotice=${onNotice} />` : null}
       ${tab === 'orders' ? html`
         <${OrdersPage} orders=${orders} settings=${settings} currentId=${draft.id}
           onOpen=${onOpen} onDelete=${onDeleteOrder} onDuplicate=${onDuplicateOrder} onFact=${setFactOrder} />` : null}
