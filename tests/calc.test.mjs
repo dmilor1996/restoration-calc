@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   num, itemGeometry, faceArea, shapeSides, shapeOutline, polyArea, setSideLength,
-  calcTotals, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
+  calcTotals, calcCost, materialCostPerM2, factSummary, aggregateStats, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
 } from '../js/calc.js';
 import { defaultSettings, defaultDraft, newItem, DEFAULT_TEMPLATES } from '../js/defaults.js';
 
@@ -221,4 +221,58 @@ test('склонение', () => {
   assert.equal(plural(1, ['ступень', 'ступени', 'ступеней']), 'ступень');
   assert.equal(plural(3, ['ступень', 'ступени', 'ступеней']), 'ступени');
   assert.equal(plural(15, ['ступень', 'ступени', 'ступеней']), 'ступеней');
+});
+
+test('нормочас: время, материалы, ваш час', () => {
+  const s = defaultSettings();
+  near(materialCostPerM2(s.cost.materials[0]), 480);   // 4500 ₽ / 750 мл × 40 мл × 2 слоя
+  const d = draftWith([item('rect', { l: 2000, w: 1000 })]);
+  let t = calcTotals(d, s), c = calcCost(d, s, t);
+  near(c.coats.oil.hours.total, 2);                    // 2×0,5 + 2×0,25 + 0,5
+  near(c.coats.oil.materials, 960);
+  near(c.coats.oil.rate, (28000 - 960) / 2);
+  near(c.coats.oil.priceTarget, 2 * 4000 + 960);
+  near(c.coats.oil.priceMin, 2 * 2500 + 960);
+  assert.equal(c.coats.oil.status, 'good');
+  near(c.coats.oil.perM2.target, 4480);
+  // раковина: +6000 к выручке и +1 час
+  d.services = { sink: true };
+  c = calcCost(d, s, calcTotals(d, s));
+  near(c.coats.oil.rate, (34000 - 960) / 3);
+  // цена вручную ниже минимума
+  d.services = {}; d.manual = { oil: '5000', lacquer: '9000' };
+  c = calcCost(d, s, calcTotals(d, s));
+  assert.equal(c.coats.oil.status, 'bad');
+});
+
+test('выезд: время, машина, доплата', () => {
+  const s = defaultSettings();
+  const d = draftWith([item('rect', { l: 1000, w: 1000 })]);
+  d.travel = { km: '100', trips: 1, charge: false, amount: '' };
+  let t = calcTotals(d, s), c = calcCost(d, s, t);
+  near(c.travel.dist, 200); near(c.travel.carCost, 3000); near(c.travel.hours, 200 / 60);
+  assert.equal(t.price.oil.final, 14000);
+  assert.ok(c.travelAdvice.need > 0);                  // маленький заказ дорогу не окупает
+  d.travel.charge = true;
+  t = calcTotals(d, s);
+  assert.equal(t.travel, 10000);
+  assert.equal(t.price.oil.final, 24000);
+  assert.equal(t.price.lacquer.final, 29000);
+  d.travel.amount = '4000';
+  assert.equal(calcTotals(d, s).price.oil.final, 18000);
+});
+
+test('статистика по выполненным заказам', () => {
+  const mk = (coat, received, area, sand, coatH, date) => ({ id: date, fact: {
+    date, coat, received, area, hours: { sand, coat: coatH, services: { sink: coat === 'oil' ? 1 : '' }, travel: '', other: '' },
+    materials: { 'm-oil': coat === 'oil' ? 200 : '' }, materialsCost: 1000, carCost: 0, expenses: '',
+  } });
+  const a = mk('oil', 30000, 2, 1.2, 0.8, '2026-10-05'), b = mk('lacquer', 50000, 3, 3, 2, '2026-11-02');
+  near(factSummary(a).rate, 29000 / 3);
+  const st = aggregateStats([a, b, { id: 'x', fact: null }, { ...a, deleted: true }]);
+  assert.equal(st.count, 2);
+  near(st.avgCheck, 40000); near(st.avgPerM2, 16000); near(st.avgRate, 78000 / 8);
+  near(st.norm.oil.sand, 0.6); near(st.norm.lacquer.sand, 1);
+  near(st.services.sink.hours, 1); near(st.materials['m-oil'].perM2, 100);
+  assert.deepEqual(st.months.map((m) => m.key), ['2026-11', '2026-10']);
 });

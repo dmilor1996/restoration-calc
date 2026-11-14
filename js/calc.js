@@ -198,6 +198,10 @@ export function calcTotals(draft, settings) {
   const has = area.total > 0;
   const minOrder = has ? num(settings.minOrder) : 0;
   const minDiff = has ? num(settings.minDiff) : 0;
+  // Доплата за выезд (если включена в расчёте): по тарифу за км или своей суммой.
+  const tp = travelPlan(draft, settings.cost);
+  const travel = has && draft.travel?.charge
+    ? (isSet(draft.travel.amount) ? num(draft.travel.amount) : roundTo(tp.tariff, settings.rounding)) : 0;
   const price = {};
   // Масло считается первым: цена лака зависит от него (минимальная разница).
   for (const c of COATS) {
@@ -205,11 +209,152 @@ export function calcTotals(draft, settings) {
     const calc = roundTo(base * k, settings.rounding);
     let auto = calc, note = '';
     if (auto < minOrder) { auto = minOrder; note = 'min'; }
+    auto += travel;
     if (c === 'lacquer' && minDiff > 0 && auto < price.oil.final + minDiff) { auto = price.oil.final + minDiff; note = 'diff'; }
     const manual = draft.manual?.[c];
     price[c] = { base, calc, auto, note, manual: isSet(manual), final: isSet(manual) ? num(manual) : auto };
   }
-  return { area, sections, k, price };
+  return { area, sections, k, price, travel };
+}
+
+// ── Себестоимость и нормочас ────────────────────────────────────
+
+/** Стоимость материала на 1 м² с учётом числа слоёв. Расход — мл на м² на один слой. */
+export function materialCostPerM2(m) {
+  const ml = num(m.volume) * 1000;
+  return ml > 0 ? (num(m.price) / ml) * materialMlPerM2(m) : 0;
+}
+export function materialMlPerM2(m) {
+  return num(m.perM2) * Math.max(1, num(m.layers) || 1);
+}
+export function materialsFor(cost, coat) {
+  return (cost?.materials || []).filter((m) => m.coat === coat || m.coat === 'both');
+}
+
+/** Дорога: километры туда-обратно, время в пути, себестоимость машины и сумма по тарифу для клиента. */
+export function travelPlan(draft, cost) {
+  const km = num(draft?.travel?.km);
+  const trips = Math.max(1, num(draft?.travel?.trips) || 1);
+  const dist = km * 2 * trips;
+  const speed = num(cost?.travel?.speed) || 60;
+  return { km, trips, dist, hours: dist / speed, carCost: dist * num(cost?.travel?.costPerKm), tariff: dist * num(cost?.travel?.perKm) };
+}
+
+/** Услуги, включённые в заказ (раковина, плита…). */
+export function orderServices(draft, settings) {
+  return (settings.services || []).filter((s) => draft.services?.[s.id]);
+}
+
+/**
+ * Проверка цены нормочасом. Для каждого покрытия:
+ *   время = площадь × (шлифовка + нанесение) + подготовка + услуги + дорога
+ *   расходы = материалы + машина
+ *   «ваш час» = (выручка − расходы) / время
+ *   цена по желаемому/минимальному часу = время × час + расходы
+ */
+export function calcCost(draft, settings, totals) {
+  const cost = settings.cost;
+  const area = totals.area.total;
+  const tp = travelPlan(draft, cost);
+  const services = orderServices(draft, settings);
+  const servicesRevenue = services.reduce((s, x) => s + num(x.price), 0);
+  const servicesHours = services.reduce((s, x) => s + num(x.hours), 0);
+  const rateTarget = num(cost.rateTarget), rateMin = num(cost.rateMin);
+  const out = { area, travel: tp, services, servicesRevenue, rateTarget, rateMin, coats: {} };
+
+  for (const c of COATS) {
+    const t = cost.time[c] || {};
+    const hours = {
+      sand: area * num(t.sand), coat: area * num(t.coat), fixed: area > 0 ? num(t.fixed) : 0,
+      services: servicesHours, travel: tp.hours,
+    };
+    hours.work = hours.sand + hours.coat + hours.fixed;
+    hours.total = hours.work + hours.services + hours.travel;
+    const materials = materialsFor(cost, c).reduce((s, m) => s + materialCostPerM2(m) * area, 0);
+    const expenses = materials + tp.carCost;
+    const revenue = totals.price[c].final + servicesRevenue;
+    const rate = hours.total > 0 ? (revenue - expenses) / hours.total : 0;
+    const priceTarget = hours.total * rateTarget + expenses;
+    const priceMin = hours.total * rateMin + expenses;
+    out.coats[c] = {
+      hours, materials, carCost: tp.carCost, expenses, revenue, rate, priceTarget, priceMin,
+      status: area <= 0 ? 'none' : rate >= rateTarget ? 'good' : rate >= rateMin ? 'warn' : 'bad',
+      // Сравнение «за м²»: только сама работа, без услуг и дороги.
+      perM2: area > 0 ? {
+        price: (totals.price[c].final - (totals.travel || 0)) / area,
+        target: (hours.work * rateTarget + materials) / area,
+        min: (hours.work * rateMin + materials) / area,
+      } : null,
+    };
+  }
+
+  // Подсказка по выезду: сколько добавить, чтобы с дорогой выйти на желаемый час (по более дешёвому покрытию).
+  if (tp.dist > 0 && area > 0) {
+    const worst = COATS.map((c) => out.coats[c]).sort((a, b) => a.rate - b.rate)[0];
+    const gap = worst.priceTarget - worst.revenue;
+    out.travelAdvice = {
+      charged: totals.travel || 0, tariff: tp.tariff,
+      need: gap > 0 ? Math.ceil(gap / 100) * 100 : 0,
+    };
+  }
+  return out;
+}
+
+// ── Факт и статистика ───────────────────────────────────────────
+
+/** Итоги выполненного заказа по введённому факту. */
+export function factSummary(order) {
+  const f = order?.fact;
+  if (!f) return null;
+  const h = f.hours || {};
+  const servicesHours = Object.values(h.services || {}).reduce((s, v) => s + num(v), 0);
+  const hours = num(h.sand) + num(h.coat) + servicesHours + num(h.travel) + num(h.other);
+  const expenses = num(f.materialsCost) + num(f.carCost) + num(f.expenses);
+  const received = num(f.received);
+  const profit = received - expenses;
+  const area = num(f.area);
+  return {
+    received, hours, expenses, profit, area,
+    rate: hours > 0 ? profit / hours : 0,
+    perM2: area > 0 ? received / area : 0,
+  };
+}
+
+/** Сводная статистика по выполненным заказам. */
+export function aggregateStats(orders) {
+  const done = (orders || []).filter((o) => !o.deleted && o.fact);
+  const sum = { count: 0, received: 0, profit: 0, hours: 0, area: 0, expenses: 0 };
+  const norm = { oil: { sand: 0, coat: 0, sandArea: 0, coatArea: 0, n: 0 }, lacquer: { sand: 0, coat: 0, sandArea: 0, coatArea: 0, n: 0 } };
+  const services = {}, materials = {}, months = {};
+  for (const o of done) {
+    const f = o.fact, fs = factSummary(o), h = f.hours || {};
+    sum.count++; sum.received += fs.received; sum.profit += fs.profit; sum.hours += fs.hours; sum.area += fs.area; sum.expenses += fs.expenses;
+    const nc = norm[f.coat];
+    if (nc) {
+      nc.n++;
+      if (num(h.sand) > 0 && fs.area > 0) { nc.sand += num(h.sand); nc.sandArea += fs.area; }
+      if (num(h.coat) > 0 && fs.area > 0) { nc.coat += num(h.coat); nc.coatArea += fs.area; }
+    }
+    for (const [id, v] of Object.entries(h.services || {})) {
+      if (num(v) > 0) { services[id] ||= { hours: 0, n: 0 }; services[id].hours += num(v); services[id].n++; }
+    }
+    for (const [id, v] of Object.entries(f.materials || {})) {
+      if (num(v) > 0 && fs.area > 0) { materials[id] ||= { ml: 0, area: 0, n: 0 }; materials[id].ml += num(v); materials[id].area += fs.area; materials[id].n++; }
+    }
+    const key = String(f.date || '').slice(0, 7) || 'без даты';
+    months[key] ||= { key, count: 0, received: 0, profit: 0, hours: 0, area: 0 };
+    const m = months[key];
+    m.count++; m.received += fs.received; m.profit += fs.profit; m.hours += fs.hours; m.area += fs.area;
+  }
+  const div = (a, b) => (b > 0 ? a / b : 0);
+  return {
+    ...sum,
+    avgCheck: div(sum.received, sum.count), avgPerM2: div(sum.received, sum.area), avgRate: div(sum.profit, sum.hours),
+    norm: Object.fromEntries(Object.entries(norm).map(([c, v]) => [c, { n: v.n, sand: div(v.sand, v.sandArea), coat: div(v.coat, v.coatArea) }])),
+    services: Object.fromEntries(Object.entries(services).map(([id, v]) => [id, { n: v.n, hours: div(v.hours, v.n) }])),
+    materials: Object.fromEntries(Object.entries(materials).map(([id, v]) => [id, { n: v.n, perM2: div(v.ml, v.area) }])),
+    months: Object.values(months).sort((a, b) => (a.key < b.key ? 1 : -1)).map((m) => ({ ...m, rate: div(m.profit, m.hours) })),
+  };
 }
 
 // ── Форматирование ──────────────────────────────────────────────
@@ -249,6 +394,7 @@ export function templateVars(totals, settings) {
     'лак': fmtPrice(totals.price.lacquer.final, cur),
     'масло': fmtPrice(totals.price.oil.final, cur),
     'площадь': `${fmtArea(totals.area.total)}${NBSP}м²`,
+    'выезд': fmtPrice(totals.travel || 0, cur),
   };
   for (const s of settings.services || []) {
     const key = normKey(s.key);

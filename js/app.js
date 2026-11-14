@@ -1,6 +1,6 @@
 import { html, render, useState, useEffect, useRef, useMemo } from './vendor/preact-htm.js';
 import {
-  num, itemGeometry, shapeSides, shapeOutline, sectionArea, calcTotals, sortedTiers,
+  num, itemGeometry, shapeSides, shapeOutline, sectionArea, calcTotals, calcCost, travelPlan, factSummary, sortedTiers,
   templateVars, templateParts, usedKeys, normKey,
   fmtArea, fmtInt, fmtNum, fmtPrice, plural,
 } from './calc.js';
@@ -11,6 +11,7 @@ import {
 } from './store.js';
 import { Icon, Num, Text, Stepper, Switch, AutoText, copyText } from './ui.js';
 import { Diagram, PolyEditor } from './diagram.js';
+import { NormPanel, CostPage, FactModal, StatsPage } from './cost.js';
 
 // ── Справочники ─────────────────────────────────────────────────
 
@@ -254,37 +255,67 @@ function Modes({ draft, settings, upDraft }) {
     </div>`;
 }
 
-// ── Условия: ночная работа ──────────────────────────────────────
+// ── Дополнительно: услуги, выезд, ночная работа ─────────────────
 
 const NIGHT_STEPS = ['1.5', '1.6', '1.7', '1.8', '1.9', '2'];
 
-function Conditions({ no, draft, upDraft }) {
+function Extras({ no, draft, settings, upDraft }) {
   const n = draft.night;
   const k = num(n.k);
+  const cur = settings.currency;
+  const tp = travelPlan(draft, settings.cost);
+  const t = draft.travel;
   return html`
     <section class="section">
       <header class="section__head">
         <span class="section__no">${no}</span>
-        <div class="section__title"><h2>Условия</h2><p>Коэффициент к стоимости работ</p></div>
+        <div class="section__title"><h2>Дополнительно</h2><p>Услуги и выезд — учитываются в нормочасе</p></div>
       </header>
-      <div class=${'card night' + (n.on ? ' is-on' : '')}>
-        <div class="night__row">
-          <div>
-            <h3>Ночная работа</h3>
-            <p>Цена умножается на коэффициент от 1,5 до 2</p>
+      <div class="card extras">
+        <div class="setting">
+          <div><h3>В заказе</h3><p>Отметьте, что делаете сами</p></div>
+          <div class="chips">
+            ${settings.services.map((s) => html`
+              <button type="button" key=${s.id} class=${'chip' + (draft.services[s.id] ? ' is-on' : '')} aria-pressed=${draft.services[s.id] ? 'true' : 'false'}
+                onClick=${() => upDraft((d) => { d.services[s.id] = !d.services[s.id]; })}>${normKey(s.key) || s.name} · ${fmtPrice(s.price, cur)}</button>`)}
           </div>
-          <${Switch} on=${n.on} label="Ночная работа" onChange=${(on) => upDraft((d) => { d.night.on = on; })} />
         </div>
-        ${n.on ? html`
-          <div class="night__k">
-            <div class="chips">
-              ${NIGHT_STEPS.map((v) => html`
-                <button type="button" class=${'chip chip--num' + (k === num(v) ? ' is-on' : '')}
-                  onClick=${() => upDraft((d) => { d.night.k = v; })}>×${v.replace('.', ',')}</button>`)}
+        <hr class="rule" />
+        <div class="setting">
+          <div><h3>Выезд</h3>
+            <p>${tp.dist > 0 ? `${fmtInt(tp.dist)} км всего · ${fmtNum(tp.hours, 1)} ч в дороге · по тарифу ${fmtPrice(tp.tariff, cur)}` : 'Расстояние в одну сторону — для дальних заказов'}</p></div>
+          <div class="fields fields--pair">
+            <${Num} label="В одну сторону" suffix="км" value=${t.km} onChange=${(v) => upDraft((d) => { d.travel.km = v; })} />
+            <${Num} label="Выездов" value=${t.trips} onChange=${(v) => upDraft((d) => { d.travel.trips = v; })} />
+          </div>
+        </div>
+        ${tp.dist > 0 ? html`
+          <div class="setting setting--sub">
+            <div><h3>Добавить выезд в цену</h3><p>Сумма прибавится к цене лака и масла</p></div>
+            <div class="extras__charge">
+              ${t.charge ? html`<${Num} cls="field--w" group suffix=${cur} aria="Сумма за выезд" value=${t.amount}
+                placeholder=${fmtInt(Math.round(tp.tariff / 100) * 100)} onChange=${(v) => upDraft((d) => { d.travel.amount = v; })} />` : null}
+              <${Switch} on=${t.charge} label="Добавить выезд в цену" onChange=${(on) => upDraft((d) => { d.travel.charge = on; })} />
             </div>
-            <${Num} cls="field--inline" decimal suffix="×" aria="Свой коэффициент" value=${n.k}
-              onChange=${(v) => upDraft((d) => { d.night.k = v; })} placeholder="1,5" />
           </div>` : null}
+        <hr class="rule" />
+        <details class="extras__night" open=${n.on}>
+          <summary>Ночная работа${n.on ? ` · ×${fmtNum(k)}` : ''}</summary>
+          <div class="night__row">
+            <p>Вся цена умножается на коэффициент от 1,5 до 2</p>
+            <${Switch} on=${n.on} label="Ночная работа" onChange=${(on) => upDraft((d) => { d.night.on = on; })} />
+          </div>
+          ${n.on ? html`
+            <div class="night__k">
+              <div class="chips">
+                ${NIGHT_STEPS.map((v) => html`
+                  <button type="button" class=${'chip chip--num' + (k === num(v) ? ' is-on' : '')}
+                    onClick=${() => upDraft((d) => { d.night.k = v; })}>×${v.replace('.', ',')}</button>`)}
+              </div>
+              <${Num} cls="field--inline" decimal suffix="×" aria="Свой коэффициент" value=${n.k}
+                onChange=${(v) => upDraft((d) => { d.night.k = v; })} placeholder="1,5" />
+            </div>` : null}
+        </details>
       </div>
     </section>`;
 }
@@ -353,7 +384,6 @@ function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) 
     <div class="card total">
       <div class="total__head">
         <span class="eyebrow">Итог</span>
-        <button type="button" class="link-btn" onClick=${onNew}>Новый расчёт</button>
       </div>
       <div class="total__area">${fmtArea(totals.area.total)}<small>м²</small></div>
 
@@ -376,6 +406,10 @@ function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) 
         ${totals.k !== 1 ? html`
           <div class="rates__row rates__row--note">
             <span class="rates__name">Ночная работа</span><span></span><span class="rates__k">×${fmtNum(totals.k)}</span>
+          </div>` : null}
+        ${totals.travel ? html`
+          <div class="rates__row rates__row--note">
+            <span class="rates__name">Выезд</span><span></span><span class="rates__k">+${fmtInt(totals.travel)}</span>
           </div>` : null}
         ${offRange ? html`<p class="rates__warn">Площадь не попала ни в один диапазон прайса — взята ближайшая ставка.</p>` : null}
       </div>
@@ -443,7 +477,7 @@ function TemplateCard({ tpl, vars, settings, upSettings, toast, phone }) {
 
 // ── Страница «Расчёт» ───────────────────────────────────────────
 
-function CalcPage({ draft, settings, totals, vars, upDraft, upSettings, withUndo, toast, onNew, saved, dirty, onSave, notice, onNotice }) {
+function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, upDraft, upSettings, withUndo, toast, onNew, saved, dirty, onSave, notice, onNotice }) {
   const summaryRef = useRef(null);
   const [barHidden, setBarHidden] = useState(false);
   const [polyEdit, setPolyEdit] = useState(null);
@@ -464,16 +498,22 @@ function CalcPage({ draft, settings, totals, vars, upDraft, upSettings, withUndo
   return html`
     <div class="layout">
       <div class="layout__main">
-        <${Modes} draft=${draft} settings=${settings} upDraft=${upDraft} />
+        <div class="calc-top">
+          <${Modes} draft=${draft} settings=${settings} upDraft=${upDraft} />
+          <button type="button" class="clear-btn" onClick=${onNew} title="Очистить всё и начать новый расчёт">
+            ${Icon.reset()}<span>Очистить всё</span>
+          </button>
+        </div>
         ${shown.map((kind, i) => html`
           <${Section} key=${kind} no=${no(i)} kind=${kind} items=${draft[kind]} settings=${settings}
             upDraft=${upDraft} withUndo=${withUndo} onEditPoly=${onEditPoly} />`)}
-        <${Conditions} no=${no(shown.length)} draft=${draft} upDraft=${upDraft} />
+        <${Extras} no=${no(shown.length)} draft=${draft} settings=${settings} upDraft=${upDraft} />
         <${ClientSection} no=${no(shown.length + 1)} draft=${draft} upDraft=${upDraft} saved=${saved} dirty=${dirty} onSave=${onSave} />
       </div>
 
       <aside class="layout__aside" id="summary" ref=${summaryRef}>
         <${Summary} draft=${draft} settings=${settings} totals=${totals} upDraft=${upDraft} onNew=${onNew} notice=${notice} onNotice=${onNotice} />
+        <${NormPanel} cost=${cost} settings=${settings} hidden=${hideCost} onToggle=${onHideCost} />
         ${settings.templates.map((tpl) => html`
           <${TemplateCard} key=${tpl.id} tpl=${tpl} vars=${vars} settings=${settings} upSettings=${upSettings} toast=${toast} phone=${draft.client.phone} />`)}
       </aside>
@@ -499,20 +539,23 @@ function CalcPage({ draft, settings, totals, vars, upDraft, upSettings, withUndo
 
 // ── Страница «Заказы» ───────────────────────────────────────────
 
-function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate }) {
+function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate, onFact }) {
   const [q, setQ] = useState('');
+  const [show, setShow] = useState('all');
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return orders
       .filter((o) => !o.deleted)
+      .filter((o) => show === 'all' || (show === 'done') === !!o.fact)
       .filter((o) => {
         if (!needle) return true;
         const c = o.draft?.client || {};
         return [c.name, c.phone, c.address, c.note].some((v) => String(v || '').toLowerCase().includes(needle));
       })
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }, [orders, q]);
+  }, [orders, q, show]);
   const total = orders.filter((o) => !o.deleted).length;
+  const doneCount = orders.filter((o) => !o.deleted && o.fact).length;
 
   return html`
     <div class="page">
@@ -522,6 +565,11 @@ function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate
             <p>${total ? `${total} ${plural(total, ['сохранённый расчёт', 'сохранённых расчёта', 'сохранённых расчётов'])}` : 'Сохранённые расчёты с данными клиентов'}</p></div>
         </header>
 
+        ${doneCount ? html`
+          <div class="seg seg--fit">
+            ${[['all', 'Все'], ['open', 'В работе'], ['done', 'Выполненные']].map(([v, l]) => html`
+              <button type="button" class=${'seg__btn' + (show === v ? ' is-on' : '')} onClick=${() => setShow(v)}>${l}</button>`)}
+          </div>` : null}
         ${total > 3 ? html`
           <label class="field search">
             <span class="field__box">${Icon.search()}<input type="search" value=${q} placeholder="Имя, телефон или адрес"
@@ -540,6 +588,7 @@ function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate
           ${list.map((o) => {
             const c = o.draft?.client || {};
             const tel = phoneDigits(c.phone);
+            const fs = factSummary(o);
             const count = ['surfaces', 'stairs'].filter((k) => o.draft?.show?.[k] !== false)
               .reduce((s, k) => s + (o.draft?.[k]?.length || 0), 0);
             return html`
@@ -548,17 +597,24 @@ function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate
                   <div class="order__title">
                     <h3>${c.name || c.address || 'Без имени'}</h3>
                     ${o.id === currentId ? html`<span class="order__badge">открыт</span>` : null}
+                    ${o.fact ? html`<span class="order__badge order__badge--done">выполнен</span>` : null}
                   </div>
                   ${c.name && c.address ? html`<p class="order__addr">${c.address}</p>` : null}
                   ${c.note ? html`<p class="order__note">${c.note}</p>` : null}
                   <p class="order__meta">${fmtDate(o.updatedAt)} · ${fmtArea(o.totals?.area)} м² · ${count} ${plural(count, ['позиция', 'позиции', 'позиций'])}${o.draft?.night?.on ? ' · ночная' : ''}</p>
                 </button>
-                <div class="order__prices">
-                  <div><span>Лак</span><b>${fmtPrice(o.totals?.lacquer, settings.currency)}</b></div>
-                  <div><span>Масло</span><b>${fmtPrice(o.totals?.oil, settings.currency)}</b></div>
-                </div>
+                ${fs ? html`
+                  <div class="order__prices">
+                    <div><span>Получено</span><b>${fmtPrice(fs.received, settings.currency)}</b></div>
+                    <div><span>Ваш час</span><b>${fmtPrice(fs.rate, settings.currency)}</b></div>
+                  </div>` : html`
+                  <div class="order__prices">
+                    <div><span>Лак</span><b>${fmtPrice(o.totals?.lacquer, settings.currency)}</b></div>
+                    <div><span>Масло</span><b>${fmtPrice(o.totals?.oil, settings.currency)}</b></div>
+                  </div>`}
                 <div class="order__actions">
                   <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(o)}>Открыть</button>
+                  <button type="button" class=${'btn btn--sm ' + (o.fact ? 'btn--ghost' : 'btn--done')} onClick=${() => onFact(o)}>${Icon.check()}<span>${o.fact ? 'Факт' : 'Выполнен'}</span></button>
                   ${tel ? html`<a class="btn btn--ghost btn--sm" href=${'tel:+' + tel}>${Icon.phone()}<span>Позвонить</span></a>` : null}
                   ${c.address ? html`<a class="btn btn--ghost btn--sm" target="_blank" rel="noopener"
                     href=${'https://yandex.ru/maps/?text=' + encodeURIComponent(c.address)}>${Icon.pin()}<span>Карта</span></a>` : null}
@@ -830,12 +886,28 @@ function TextsPage({ settings, vars, upSettings, withUndoSettings }) {
     </div>`;
 }
 
+// ── Настройки: цены, себестоимость, тексты ──────────────────────
+
+const SETTINGS_TABS = [['prices', 'Цены'], ['cost', 'Себестоимость'], ['texts', 'Тексты']];
+
+function SettingsNav({ tab }) {
+  return html`
+    <nav class="subnav" aria-label="Настройки">
+      <div class="seg">
+        ${SETTINGS_TABS.map(([id, label]) => html`
+          <a href=${'#' + id} class=${'seg__btn' + (tab === id ? ' is-on' : '')}>${label}</a>`)}
+      </div>
+    </nav>`;
+}
+
 // ── Приложение ──────────────────────────────────────────────────
 
-const TABS = [['calc', 'Расчёт'], ['orders', 'Заказы'], ['prices', 'Цены'], ['texts', 'Тексты']];
+const TABS = [['calc', 'Расчёт'], ['orders', 'Заказы'], ['stats', 'Статистика'], ['prices', 'Настройки']];
+const ROUTES = ['calc', 'orders', 'stats', 'prices', 'cost', 'texts'];
 const THEMES = ['auto', 'light', 'dark'];
 const THEME_LABEL = { auto: 'Тема: как в системе', light: 'Тема: светлая', dark: 'Тема: тёмная' };
-const tabFromHash = () => (TABS.some(([id]) => '#' + id === location.hash) ? location.hash.slice(1) : 'calc');
+const tabFromHash = () => (ROUTES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'calc');
+const topTab = (tab) => (['cost', 'texts'].includes(tab) ? 'prices' : tab);
 
 function App() {
   const [settings, setSettings] = useState(loadSettings);
@@ -846,6 +918,9 @@ function App() {
   const [cloud, setCloud] = useState({ status: cloudConfigured ? 'init' : 'off', user: null });
   const [toastState, setToastState] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [factOrder, setFactOrder] = useState(null);
+  const [hideCost, setHideCost] = useState(() => { try { return localStorage.getItem('rc.hideCost') === '1'; } catch { return false; } });
+  const onHideCost = () => setHideCost((v) => { try { localStorage.setItem('rc.hideCost', v ? '0' : '1'); } catch { /* noop */ } return !v; });
   const settingsRef = useRef(settings);
   const ordersRef = useRef(orders);
   const remoteAt = useRef(null);
@@ -865,7 +940,7 @@ function App() {
   const withUndo = (msg) => { const prev = draft; toast(msg, () => setDraft(prev)); };
   const withUndoSettings = (msg) => { const prev = settings; toast(msg, () => replaceSettings(prev)); };
   const onNew = () => {
-    withUndo('Начат новый расчёт');
+    withUndo('Расчёт очищен');
     setNotice(null);
     setDraft(defaultDraft(settings));
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -873,6 +948,7 @@ function App() {
 
   const totals = useMemo(() => calcTotals(draft, settings), [draft, settings]);
   const vars = useMemo(() => templateVars(totals, settings), [totals, settings]);
+  const cost = useMemo(() => calcCost(draft, settings, totals), [draft, settings, totals]);
 
   // ── Заказы ──
   // Заказы записываются в память браузера сразу, не дожидаясь перерисовки.
@@ -922,8 +998,19 @@ function App() {
     const d = structuredClone(order.draft);
     d.id = id;
     d.client = { ...d.client, name: d.client?.name ? d.client.name + ' (копия)' : '' };
-    putOrder({ ...structuredClone(order), id, createdAt: now, updatedAt: now, draft: d });
+    putOrder({ ...structuredClone(order), id, createdAt: now, updatedAt: now, draft: d, fact: null });
     toast('Создана копия заказа');
+  };
+  const onFactSave = (fact) => {
+    putOrder({ ...factOrder, fact, updatedAt: Date.now() });
+    setFactOrder(null);
+    toast('Заказ отмечен выполненным');
+  };
+  const onFactReopen = () => {
+    const { fact, ...rest } = factOrder;
+    putOrder({ ...rest, fact: null, updatedAt: Date.now() });
+    setFactOrder(null);
+    toast('Заказ возвращён в работу');
   };
   const onImport = (data) => {
     const { orders: imported, ...rest } = data;
@@ -1007,7 +1094,7 @@ function App() {
         </a>
         <nav class="tabs" aria-label="Разделы">
           ${TABS.map(([id, label]) => html`
-            <a href=${'#' + id} class=${'tabs__btn' + (tab === id ? ' is-on' : '')} aria-current=${tab === id ? 'page' : null}>${label}${id === 'orders' && orderCount ? html`<sup>${orderCount}</sup>` : null}</a>`)}
+            <a href=${'#' + id} class=${'tabs__btn' + (topTab(tab) === id ? ' is-on' : '')} aria-current=${topTab(tab) === id ? 'page' : null}>${label}${id === 'orders' && orderCount ? html`<sup>${orderCount}</sup>` : null}</a>`)}
         </nav>
         <div class="top__tools">
           ${cloudConfigured ? html`
@@ -1021,17 +1108,23 @@ function App() {
 
     <main class="wrap">
       ${tab === 'calc' ? html`
-        <${CalcPage} draft=${draft} settings=${settings} totals=${totals} vars=${vars}
+        <${CalcPage} draft=${draft} settings=${settings} totals=${totals} vars=${vars} cost=${cost} hideCost=${hideCost} onHideCost=${onHideCost}
           upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast} onNew=${onNew}
           saved=${saved} dirty=${dirty} onSave=${onSave} notice=${notice} onNotice=${onNotice} />` : null}
       ${tab === 'orders' ? html`
         <${OrdersPage} orders=${orders} settings=${settings} currentId=${draft.id}
-          onOpen=${onOpen} onDelete=${onDeleteOrder} onDuplicate=${onDuplicateOrder} />` : null}
+          onOpen=${onOpen} onDelete=${onDeleteOrder} onDuplicate=${onDuplicateOrder} onFact=${setFactOrder} />` : null}
+      ${tab === 'stats' ? html`<${StatsPage} orders=${orders} settings=${settings} />` : null}
+      ${topTab(tab) === 'prices' ? html`<${SettingsNav} tab=${tab} />` : null}
+      ${tab === 'cost' ? html`<div class="page"><${CostPage} settings=${settings} upSettings=${upSettings} /></div>` : null}
       ${tab === 'prices' ? html`
         <${PricesPage} settings=${settings} upSettings=${upSettings} cloud=${cloud} toast=${toast} onImport=${onImport} orders=${orders} />` : null}
       ${tab === 'texts' ? html`
         <${TextsPage} settings=${settings} vars=${vars} upSettings=${upSettings} withUndoSettings=${withUndoSettings} />` : null}
     </main>
+
+    ${factOrder ? html`
+      <${FactModal} order=${factOrder} settings=${settings} onSave=${onFactSave} onReopen=${onFactReopen} onClose=${() => setFactOrder(null)} />` : null}
 
     <div class=${'toast' + (toastState ? ' is-on' : '')} role="status" aria-live="polite">
       ${toastState ? html`

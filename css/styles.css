@@ -734,3 +734,138 @@ html.is-locked { overflow: hidden; }
   .order__actions .btn--primary span { display: inline; }
   .field--w { width: 130px; }
 }
+
+
+/* ── Третья версия: нормочас, себестоимость, статистика ──────── */
+
+.calc-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: stretch; }
+.clear-btn {
+  display: grid; place-content: center; justify-items: center; gap: 6px; padding: 0 18px; min-width: 104px;
+  border-radius: var(--r-lg); border: 1px solid var(--line-strong); color: var(--muted);
+  font-size: 13.5px; font-weight: 500; line-height: 1.2;
+  transition: border-color .15s, color .15s, background .15s, transform .1s;
+}
+.clear-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.clear-btn:active { transform: scale(.97); }
+
+.subnav { max-width: 860px; margin: 0 auto 28px; }
+.subnav .seg { display: flex; }
+.subnav .seg__btn { flex: 1; text-align: center; padding: 10px 12px; font-size: 15px; }
+.seg--fit { justify-self: start; }
+
+/* Дополнительно */
+.extras .setting { align-items: center; }
+.setting--sub { margin-top: 16px; }
+.fields--pair { grid-template-columns: repeat(2, 132px); }
+.extras__charge { display: flex; align-items: center; gap: 12px; }
+.extras__night summary { cursor: pointer; font-size: 15px; font-weight: 500; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 8px; }
+.extras__night summary::-webkit-details-marker { display: none; }
+.extras__night summary::before { content: '+'; font: 400 16px/1 var(--mono); width: 14px; }
+.extras__night[open] summary::before { content: '–'; }
+.extras__night[open] summary { color: var(--text); margin-bottom: 14px; }
+.extras__night .night__row p { font-size: 13.5px; color: var(--muted); }
+.extras__night .night__k { margin-top: 14px; }
+
+/* Нормочас */
+.norm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.norm__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.norm__col { --tone: var(--muted); display: grid; gap: 2px; padding: 14px 16px; border-radius: 18px; background: var(--surface-2); border-left: 3px solid var(--tone); }
+.norm__col.is-good { --tone: var(--ok); }
+.norm__col.is-warn { --tone: #C58A1B; }
+.norm__col.is-bad { --tone: #C0392B; }
+.norm__label { font-size: 14px; font-weight: 600; }
+.norm__rate { font-size: 27px; font-weight: 600; letter-spacing: -.03em; line-height: 1.15; color: var(--tone); white-space: nowrap; }
+.norm__rate small { font: 500 12px/1 var(--font); color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+.norm__status { font: 400 11px/1.3 var(--mono); color: var(--tone); }
+.norm dl { margin: 10px 0 0; display: grid; gap: 4px; }
+.norm dl div { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.norm dt { color: var(--muted); white-space: nowrap; }
+.norm dd { margin: 0; font-weight: 600; white-space: nowrap; }
+.norm__m2 { display: grid; gap: 4px; }
+.norm__m2 p { font-size: 13.5px; color: var(--muted); }
+.norm__m2 b { color: var(--text); font-weight: 600; }
+.norm__m2 .eyebrow { margin-bottom: 4px; }
+.norm__advice { font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.norm__advice.is-warn { color: var(--accent); }
+.norm__details summary { cursor: pointer; font-size: 13.5px; font-weight: 500; color: var(--muted); }
+.norm__details table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13.5px; }
+.norm__details th { font: 500 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); text-align: right; padding-bottom: 6px; }
+.norm__details td { padding: 5px 0; border-top: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.norm__details td:first-child { text-align: left; color: var(--muted); white-space: normal; }
+.norm__details .is-sum td { font-weight: 600; color: var(--text); }
+
+/* Себестоимость */
+.grid3 { display: grid; grid-template-columns: minmax(0, 1fr) 130px 130px; gap: 10px; align-items: center; padding: 8px 0; }
+.grid3 h3 { font-size: 16px; font-weight: 600; }
+.grid3 p { font-size: 13px; color: var(--muted); }
+.grid3--head { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 0 2px 4px; }
+.mats { display: grid; gap: 18px; }
+.mat { display: grid; gap: 10px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.mat:last-child { border-bottom: 0; padding-bottom: 0; }
+.mat__head { display: flex; align-items: end; gap: 8px; }
+.mat__head .icon-btn { margin-bottom: 6px; }
+.mat__fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.mat__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mat__sum { font-size: 14px; color: var(--muted); }
+.mat__sum b { color: var(--text); }
+.card__note--end { margin: 18px 0 0; }
+.field input[type='date'] { font-size: 16px; font-weight: 500; min-height: 24px; }
+
+/* Факт */
+.modal__box--narrow { width: min(680px, 100%); }
+.fact { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-content: start; }
+.fact .card__note { margin: 0; }
+.fact__row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.fact .eyebrow { margin-top: 6px; }
+.btn--done { background: var(--ok); color: #fff; }
+.order__badge--done { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+
+/* Статистика */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.kpi { display: grid; gap: 6px; padding: 20px; align-content: start; }
+.kpi b { font-size: 28px; font-weight: 600; letter-spacing: -.03em; line-height: 1.1; white-space: nowrap; }
+.kpi b small { font: 500 13px/1 var(--font); color: var(--muted); margin-left: 5px; letter-spacing: 0; }
+.kpi p { font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+.kpi--main { grid-column: 1 / -1; padding: 26px 24px; }
+.kpi--main b { font-size: 56px; letter-spacing: -.045em; }
+.kpi--main.is-good b { color: var(--ok); }
+.kpi--main.is-warn b { color: #C58A1B; }
+.kpi--main.is-bad b { color: #C0392B; }
+.kpi--main p { font-size: 14px; }
+.versus-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; }
+.versus { display: grid; gap: 2px; }
+.versus__label { font-size: 14px; color: var(--muted); }
+.versus b { font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+.versus b small { font: 400 12px/1 var(--mono); color: var(--muted); margin-left: 5px; }
+.versus__plan { font: 400 11.5px/1.4 var(--mono); color: var(--muted); }
+.versus__plan .is-up { color: #C0392B; }
+.versus__plan .is-down { color: var(--ok); }
+.lead--sm { font-size: 13.5px; }
+.months { display: grid; gap: 0; padding: 12px 24px; }
+.months__row { display: grid; grid-template-columns: minmax(0, 1.4fr) .6fr 1fr 1fr 1fr; gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 15px; text-align: right; }
+.months__row span:first-child { text-align: left; }
+.months__row--head { border-top: 0; font: 500 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.months__row b { font-weight: 600; }
+
+@media (max-width: 720px) {
+  .calc-top { grid-template-columns: minmax(0, 1fr); }
+  .clear-btn { display: flex; justify-content: center; padding: 12px; min-width: 0; border-radius: 16px; }
+  .tabs__btn { font-size: 13.5px; }
+  .subnav { margin-bottom: 22px; }
+  .subnav .seg__btn { padding: 9px 4px; font-size: 14px; }
+  .fields--pair { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .extras .setting > .chips { width: 100%; }
+  .grid3 { grid-template-columns: minmax(0, 1fr) 84px 84px; gap: 6px; }
+  .grid3 .field__box { padding: 0 10px; }
+  .grid3 h3 { font-size: 15px; }
+  .mat__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi { padding: 16px; }
+  .kpi b { font-size: 22px; }
+  .kpi--main b { font-size: 44px; }
+  .versus-grid { grid-template-columns: minmax(0, 1fr); }
+  .months { padding: 8px 14px; }
+  .months__row { font-size: 13.5px; gap: 6px; grid-template-columns: minmax(0, 1.3fr) .5fr 1fr 1fr 1fr; }
+  .norm__rate { font-size: 23px; }
+  .section__head:has(.seg) { flex-wrap: wrap; }
+}
