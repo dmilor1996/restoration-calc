@@ -33,6 +33,9 @@ export const Icon = {
   chat: () => svg(html`<path d="M4 19.5 5.3 15A8 8 0 1 1 9 18.7z" />`, 18),
   save: () => svg(html`<path d="M5 4h11l3 3v13H5z" /><path d="M8 4v5h7V4M8 20v-6h8v6" />`, 18),
   search: () => svg(html`<circle cx="11" cy="11" r="6.5" /><path d="m16 16 4.5 4.5" />`, 18),
+  up: () => svg(html`<path d="m6 15 6-6 6 6" />`, 18),
+  arrow: () => svg(html`<path d="M5 12h14m0 0-6-6m6 6-6 6" />`, 18),
+  chevron: () => svg(html`<path d="m6 9 6 6 6-6" />`, 16),
   back: () => svg(html`<path d="M19 12H5m0 0 6-6m-6 6 6 6" />`, 18),
   clock: () => svg(html`<circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" />`, 18),
   trash: () => svg(html`<path d="M4.5 7h15M9.5 7V4.5h5V7M7 7l.8 12.5h8.4L17 7" />`, 18),
@@ -60,8 +63,8 @@ export async function copyText(text) {
   return ok;
 }
 
-/** Числовое поле. group — показывать разряды («14 000»), когда поле не в фокусе. */
-export function Num({ value, onChange, onBlur, label, suffix, placeholder, decimal, group, cls, aria }) {
+/** Числовое поле. group — показывать разряды («14 000»), когда поле не в фокусе. onRemove — маленький крестик у подписи. */
+export function Num({ value, onChange, onBlur, label, suffix, placeholder, decimal, group, cls, aria, onRemove }) {
   const [focus, setFocus] = useState(false);
   const raw = value === null || value === undefined ? '' : String(value);
   const shown = group && !focus && raw !== '' ? fmtInt(raw) : raw;
@@ -72,7 +75,9 @@ export function Num({ value, onChange, onBlur, label, suffix, placeholder, decim
   };
   return html`
     <label class=${'field ' + (cls || '')}>
-      ${label ? html`<span class="field__label">${label}</span>` : null}
+      ${label || onRemove ? html`
+        <span class="field__label"><span class="field__label-text">${label}</span>
+          ${onRemove ? html`<button type="button" class="field__x" title="Убрать" aria-label=${'Убрать: ' + (label || '')} onClick=${(e) => { e.preventDefault(); onRemove(); }}>${Icon.x()}</button>` : null}</span>` : null}
       <span class="field__box">
         <input type="text" inputmode=${decimal ? 'decimal' : 'numeric'} autocomplete="off" enterkeyhint="done"
           value=${shown} placeholder=${placeholder ?? '0'} aria-label=${aria || label}
@@ -80,6 +85,28 @@ export function Num({ value, onChange, onBlur, label, suffix, placeholder, decim
           onFocus=${(e) => { setFocus(true); const el = e.target; requestAnimationFrame(() => el.select()); }}
           onBlur=${() => { setFocus(false); onBlur?.(); }} />
         ${suffix ? html`<span class="field__suffix">${suffix}</span>` : null}
+      </span>
+    </label>`;
+}
+
+/** Выпадающий список. options: [{ value, label, group }] — группы показываются заголовками. */
+export function Select({ value, onChange, options, label, aria, cls }) {
+  const groups = [];
+  for (const o of options) {
+    const g = o.group || '';
+    let x = groups.find((y) => y.g === g);
+    if (!x) { x = { g, items: [] }; groups.push(x); }
+    x.items.push(o);
+  }
+  const opt = (o) => html`<option value=${o.value} selected=${o.value === value}>${o.label}</option>`;
+  return html`
+    <label class=${'field ' + (cls || '')}>
+      ${label ? html`<span class="field__label">${label}</span>` : null}
+      <span class="field__box field__box--select">
+        <select value=${value} aria-label=${aria || label} onChange=${(e) => onChange(e.target.value)}>
+          ${groups.map((g) => (g.g ? html`<optgroup label=${g.g}>${g.items.map(opt)}</optgroup>` : g.items.map(opt)))}
+        </select>
+        ${Icon.chevron()}
       </span>
     </label>`;
 }

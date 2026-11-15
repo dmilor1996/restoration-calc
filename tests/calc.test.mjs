@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   num, itemGeometry, faceArea, shapeSides, shapeOutline, polyArea, setSideLength,
-  calcTotals, calcCost, materialCostPerM2, factSummary, aggregateStats, sandHours, upsertRecent, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
+  calcTotals, calcCost, materialCostPerM2, factSummary, aggregateStats, sandHours, upsertRecent, roundDir, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
 } from '../js/calc.js';
 import { defaultSettings, defaultDraft, newItem, normalizeDraft, normalizeSettings, DEFAULT_TEMPLATES } from '../js/defaults.js';
 
@@ -286,14 +286,77 @@ test('выбор материала и покраска морилкой', () =>
   assert.equal(calcTotals(d, s).stain, 0);
 });
 
-test('старые настройки переносятся: шлифовка и материалы', () => {
-  const s = normalizeSettings({ cost: {
-    time: { oil: { sand: 0.6, coat: 0.3, fixed: 1 }, lacquer: { sand: 0.9, coat: 0.6, fixed: 2 } },
-    materials: [{ id: 'a', name: 'Масло', coat: 'oil', volume: 1, price: 1000, perM2: 50, layers: 1 }, { id: 'b', name: 'Шкурка', coat: 'both' }],
-  } });
-  near(s.cost.time.sand, 0.6); near(s.cost.time.sandLacquerK, 2);
-  near(s.cost.time.oil.coat, 0.3); near(s.cost.time.lacquer.fixed, 2);
+test('старые настройки переносятся: часы → минуты, материалы, услуги', () => {
+  const s = normalizeSettings({
+    cost: {
+      time: { sand: 0.6, sandLacquerK: 2, oil: { coat: 0.3, fixed: 1 }, lacquer: { coat: 0.6, fixed: 2 }, stain: { coat: 0.2, fixed: 0.25 } },
+      materials: [{ id: 'a', name: 'Масло', coat: 'oil', volume: 1, price: 1000, perM2: 50, layers: 1 }, { id: 'b', name: 'Шкурка', coat: 'both' }],
+    },
+    services: [{ id: 'sink', key: 'раковина', name: 'Раковина', price: 6000, hours: 1.5 }],
+  });
+  assert.equal(s.cost.time.sandMin.oil, 36); assert.equal(s.cost.time.sandMin.lacquer, 72);
+  assert.equal(s.cost.time.oil.coatMin, 18); assert.equal(s.cost.time.lacquer.fixedMin, 120);
+  assert.equal(s.cost.time.stain.coatMin, 12); assert.equal(s.cost.time.stain.fixedMin, 15);
   assert.deepEqual(s.cost.materials.map((m) => m.kind), ['oil', 'extra']);
+  assert.equal(s.services[0].min, 90); assert.ok(!('hours' in s.services[0]));
+  // новые настройки не трогаются
+  const n = normalizeSettings({ cost: { time: { sandMin: { oil: 20, lacquer: 55 } } } });
+  assert.equal(n.cost.time.sandMin.oil, 20); assert.equal(n.cost.time.sandMin.lacquer, 55);
+});
+
+test('шлифовка в минутах отдельно для старого масла и старого лака', () => {
+  const s = defaultSettings();
+  s.cost.time.sandMin = { oil: 20, lacquer: 75 };
+  near(sandHours(2, 'oil', s.cost.time), 40 / 60);
+  near(sandHours(2, 'lacquer', s.cost.time), 150 / 60);
+  const d = draftWith([item('rect', { l: 2000, w: 1000 })]);
+  d.current = 'lacquer';
+  const c = calcCost(d, s, calcTotals(d, s));
+  near(c.coats.oil.hours.sand, 150 / 60);
+});
+
+test('оценка по фактическим средним подставляется там, где есть данные', () => {
+  const s = defaultSettings();
+  const d = draftWith([item('rect', { l: 2000, w: 1000 })]);
+  const t = calcTotals(d, s);
+  assert.equal(calcCost(d, s, t).coats.oil.actual, undefined);          // статистики нет — оценки нет
+  const act = { count: 3, sand: { oil: { n: 3, perM2: 0.8 }, lacquer: { n: 0, perM2: 0 } }, coat: { oil: { n: 0, perM2: 0 }, lacquer: { n: 2, perM2: 1 } } };
+  const c = calcCost(d, s, t, act);
+  // масло: шлифовка по факту 2×0,8 = 1,6 ч, нанесение по плану 2×15 мин + 30 мин = 1 ч
+  near(c.coats.oil.actual.hours, 1.6 + 1); assert.equal(c.coats.oil.actual.nCoat, 0);
+  near(c.coats.oil.actual.rate, c.coats.oil.profit / 2.6);
+  // лак: шлифовка та же (она зависит от старого покрытия, а не от нового), нанесение по факту 2×1 = 2 ч
+  near(c.coats.lacquer.actual.hours, 1.6 + 2);
+  // старый лак: фактических данных по шлифовке лака нет — берётся норма 60 мин/м²
+  d.current = 'lacquer';
+  const c2 = calcCost(d, s, calcTotals(d, s), act);
+  near(c2.coats.lacquer.actual.hours, 2 + 2); assert.equal(c2.coats.oil.actual, undefined);
+});
+
+test('округление: к ближайшему, вниз, вверх и своё в расчёте', () => {
+  assert.equal(roundDir(11436, 1000, 'near'), 11000);
+  assert.equal(roundDir(11436, 1000, 'up'), 12000);
+  assert.equal(roundDir(11400, 100, 'up'), 11400);                 // уже круглое число не прыгает вверх
+  assert.equal(roundDir(102340, 5000, 'near'), 100000);
+  assert.equal(roundDir(102340, 10000, 'down'), 100000);
+  const s = defaultSettings();
+  s.cost.travel.perKm = 0;
+  s.prices.surfaces = [{ id: 'a', from: 0, to: '', oil: 11436, lacquer: 20000 }];
+  const d = draftWith([item('rect', { l: 1000, w: 1000 })]);
+  let t = calcTotals(d, s);
+  assert.equal(t.price.oil.final, 11400);                          // шаг по умолчанию 100
+  near(t.price.oil.exact, 11436);
+  d.round = { step: 1000, dir: 'up' };
+  t = calcTotals(d, s);
+  assert.equal(t.price.oil.final, 12000); near(t.price.oil.exact, 11436);
+  d.round = { step: 1000, dir: 'down' };
+  assert.equal(calcTotals(d, s).price.oil.final, 11000);
+  d.round = { step: 1, dir: 'near' };
+  assert.equal(calcTotals(d, s).price.oil.final, 11436);
+  // правило «лак дороже масла» учитывает шаг округления
+  s.prices.surfaces[0].lacquer = 12000;
+  d.round = { step: 1000, dir: 'near' };
+  assert.equal(calcTotals(d, s).price.lacquer.final, 16000);       // масло 11000 + 5000
 });
 
 test('выезд: время, машина, доплата', () => {
@@ -331,6 +394,9 @@ test('статистика: этапы, общее время и старое п
   assert.equal(st.count, 3); assert.equal(st.stages, 2);
   near(st.avgCheck, 100000 / 3); near(st.avgRate, (29000 + 49000 + 19500) / (3 + 5 + 5));
   near(st.sand.oil.perM2, 0.6); near(st.sand.lacquer.perM2, 1);   // c в нормы не попал
+  const withPlan = aggregateStats([a, b], defaultSettings().cost);
+  near(withPlan.sand.oil.planPerM2, 0.5); near(withPlan.sand.lacquer.planPerM2, 1);   // норма из настроек, 30 и 60 мин/м²
+  near(withPlan.coat.oil.planPerM2, (2 * 15 + 30) / 60 / 2);                         // нанесение + подготовка на тот же заказ
   near(st.coat.oil.perM2, 0.4); near(st.coat.lacquer.perM2, 2 / 3);
   near(st.services.sink.hours, 1); assert.equal(st.services.sink.n, 1);
   near(st.materials['m-oil'].perM2, 300 / 3 );                    // расход считается и по заказу с общим временем

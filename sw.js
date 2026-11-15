@@ -1,7 +1,7 @@
 // Офлайн-режим: сайт открывается без интернета (например, на выезде).
 // Стратегия: сначала сеть (чтобы обновления приходили сразу), при её отсутствии — сохранённая копия.
 
-const CACHE = 'rc-v5';
+const CACHE = 'rc-v6';
 const CORE = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/cost.js', 'js/ui.js', 'js/diagram.js', 'js/calc.js', 'js/defaults.js', 'js/store.js', 'js/firebase-config.js', 'js/vendor/preact-htm.js',

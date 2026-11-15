@@ -1,7 +1,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from './vendor/preact-htm.js';
 import {
   num, itemGeometry, shapeSides, shapeOutline, sectionArea, calcTotals, calcCost, travelPlan, factSummary, sortedTiers,
-  materialsOfKind, pickMaterial, materialCostPerM2, upsertRecent,
+  materialsOfKind, pickMaterial, materialCostPerM2, upsertRecent, orderServices, aggregateStats,
   templateVars, templateParts, usedKeys, normKey,
   fmtArea, fmtInt, fmtNum, fmtPrice, plural,
 } from './calc.js';
@@ -10,7 +10,7 @@ import {
   loadSettings, saveSettings, loadDraft, saveDraft, loadOrders, saveOrders, loadRecent, saveRecent, loadTheme, saveTheme,
   cloudConfigured, initCloud, pushSettings, pushOrder, signIn, signOutCloud,
 } from './store.js';
-import { Icon, Num, Text, Stepper, Switch, AutoText, copyText } from './ui.js';
+import { Icon, Num, Text, Stepper, Switch, AutoText, Select, copyText } from './ui.js';
 import { Diagram, PolyEditor } from './diagram.js';
 import { NormPanel, CostPage, FactSection, startFact, StatsPage } from './cost.js';
 
@@ -249,59 +249,60 @@ function ModeSwitch({ draft, settings, upDraft }) {
     </div>`;
 }
 
-// ── Покрытие: что было, чем покрываем, покраска ──────────────────
+// ── Покрытие: материал, что было, покраска ───────────────────────
+
+const matOptions = (cost, cur) => [
+  ...materialsOfKind(cost, 'oil').map((m) => ({ value: m.id, label: `${m.name || 'Масло'} · ${fmtInt(materialCostPerM2(m))} ${cur}/м²`, group: 'Масла' })),
+  ...materialsOfKind(cost, 'lacquer').map((m) => ({ value: m.id, label: `${m.name || 'Лак'} · ${fmtInt(materialCostPerM2(m))} ${cur}/м²`, group: 'Лаки' })),
+];
 
 function Finish({ no, draft, settings, upDraft }) {
   const cost = settings.cost, cur = settings.currency;
   const coat = draft.coat === 'lacquer' ? 'lacquer' : 'oil';
-  const list = materialsOfKind(cost, coat);
   const sel = pickMaterial(cost, coat, draft.finish?.[coat]);
+  const opts = matOptions(cost, cur);
   const stainList = materialsOfKind(cost, 'stain');
   const stainSel = pickMaterial(cost, 'stain', draft.stain?.id);
   const stainOn = !!draft.stain?.on;
-  const k = num(cost.time.sandLacquerK);
-  const matChips = (items, selId, onPick) => html`
-    <div class="chips chips--mat">
-      ${items.map((m) => html`
-        <button type="button" key=${m.id} class=${'chip' + (selId === m.id ? ' is-on' : '')} aria-pressed=${selId === m.id ? 'true' : 'false'}
-          onClick=${() => onPick(m.id)}>${m.name || 'Материал'} <i>${fmtInt(materialCostPerM2(m))} ${cur}/м²</i></button>`)}
-    </div>`;
+  const sandMin = num(cost.time.sandMin?.[draft.current === 'lacquer' ? 'lacquer' : 'oil']);
+  const pickFinish = (id) => upDraft((d) => {
+    const m = cost.materials.find((x) => x.id === id);
+    if (m) { d.coat = m.kind; d.finish[m.kind] = m.id; }
+  });
   return html`
     <section class="section">
       <header class="section__head">
         <span class="section__no">${no}</span>
-        <div class="section__title"><h2>Покрытие</h2><p>От этого зависят время, материалы и ваша прибыль</p></div>
+        <div class="section__title"><h2>Покрытие</h2><p>Каким покрываем и что на поверхности сейчас</p></div>
       </header>
-      <div class="card finish">
-        <div class="setting">
-          <div><h3>Покрываем</h3><p>Для этого покрытия считаем себестоимость и прибыль</p></div>
-          <div class="seg">
-            ${[['oil', 'Масло-воск'], ['lacquer', 'Лак']].map(([v, l]) => html`
-              <button type="button" class=${'seg__btn' + (coat === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.coat = v; })}>${l}</button>`)}
+      <div class="card frows">
+        <div class="frow">
+          <span class="frow__label">Покрываем</span>
+          ${opts.length ? html`<${Select} aria="Материал покрытия" value=${sel?.id} options=${opts} onChange=${pickFinish} />`
+            : html`<span class="frow__hint is-warn">Добавьте масла и лаки в «Настройки → Себестоимость»</span>`}
+        </div>
+        <div class="frow">
+          <span class="frow__label">Сейчас</span>
+          <div class="frow__ctl">
+            <div class="seg">
+              ${[['oil', 'Масло'], ['lacquer', 'Лак']].map(([v, l]) => html`
+                <button type="button" class=${'seg__btn' + (draft.current === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.current = v; })}>${l}</button>`)}
+            </div>
+            <span class="frow__hint">шлифовка ${fmtInt(sandMin)} мин/м²</span>
           </div>
         </div>
-        ${list.length > 1 ? matChips(list, sel?.id, (id) => upDraft((d) => { d.finish[coat] = id; }))
-          : list.length === 1 ? html`<p class="finish__one">${list[0].name || 'Материал'} · ${fmtInt(materialCostPerM2(list[0]))} ${cur}/м²</p>`
-          : html`<p class="finish__one is-warn">Нет материала для этого покрытия — добавьте его в «Настройки → Себестоимость».</p>`}
-        <hr class="rule" />
-        <div class="setting">
-          <div><h3>Сейчас на поверхности</h3>
-            <p>${k > 1 ? `Старый лак шлифуется в ${fmtNum(k)} раза дольше масла` : 'От этого зависит время шлифовки'}</p></div>
-          <div class="seg">
-            ${[['oil', 'Масло'], ['lacquer', 'Лак']].map(([v, l]) => html`
-              <button type="button" class=${'seg__btn' + (draft.current === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.current = v; })}>${l}</button>`)}
+        <div class="frow">
+          <span class="frow__label">Покраска</span>
+          <div class="frow__ctl">
+            <button type="button" class=${'chip' + (stainOn ? ' is-on' : '')} aria-pressed=${stainOn ? 'true' : 'false'}
+              onClick=${() => upDraft((d) => { d.stain.on = !d.stain.on; })}>${stainOn ? 'Включена' : 'Нет'}</button>
+            ${stainOn && stainList.length > 1 ? html`<${Select} aria="Материал покраски" value=${stainSel?.id}
+              options=${stainList.map((m) => ({ value: m.id, label: `${m.name || 'Морилка'} · ${fmtInt(materialCostPerM2(m))} ${cur}/м²` }))}
+              onChange=${(id) => upDraft((d) => { d.stain.id = id; })} />` : null}
+            ${stainOn ? html`<span class="frow__hint">${stainList.length === 1 ? (stainList[0].name || 'Морилка') + ' · ' : ''}+${fmtInt(cost.stainPrice)} ${cur}/м²</span>` : null}
+            ${stainOn && !stainList.length ? html`<span class="frow__hint is-warn">нет материала — добавьте морилку в «Себестоимость»</span>` : null}
           </div>
         </div>
-        <hr class="rule" />
-        <div class="setting">
-          <div><h3>Покраска в цвет</h3>
-            <p>${stainOn ? `Добавляется ${fmtInt(cost.stainPrice)} ${cur}/м², а время и материал идут в себестоимость` : 'Морилка перед покрытием — включите, если красите'}</p></div>
-          <button type="button" class=${'chip chip--big' + (stainOn ? ' is-on' : '')} aria-pressed=${stainOn ? 'true' : 'false'}
-            onClick=${() => upDraft((d) => { d.stain.on = !d.stain.on; })}>${stainOn ? 'Покраска включена' : 'Покраска'}</button>
-        </div>
-        ${stainOn ? (stainList.length > 1 ? matChips(stainList, stainSel?.id, (id) => upDraft((d) => { d.stain.id = id; }))
-          : stainList.length === 1 ? html`<p class="finish__one">${stainList[0].name || 'Морилка'} · ${fmtInt(materialCostPerM2(stainList[0]))} ${cur}/м²</p>`
-          : html`<p class="finish__one is-warn">Нет материала-морилки — добавьте его в «Настройки → Себестоимость», иначе её стоимость не посчитается.</p>`) : null}
       </div>
     </section>`;
 }
@@ -399,6 +400,9 @@ function ClientSection({ no, draft, upDraft, sub, footer }) {
 
 // ── Итог ────────────────────────────────────────────────────────
 
+const ROUND_STEPS = [1, 100, 500, 1000, 5000, 10000];
+const ROUND_DIRS = [['down', '↓ вниз', 'Округлять вниз'], ['near', '≈ ближе', 'К ближайшему'], ['up', '↑ вверх', 'Округлять вверх']];
+
 function PriceTile({ coat, price, value, onChange, settings, picked }) {
   const tag = price.note === 'diff' ? `не ниже масла + ${fmtInt(settings.minDiff)}`
     : price.note === 'min' ? 'минимальный заказ' : 'расчёт';
@@ -413,6 +417,8 @@ function PriceTile({ coat, price, value, onChange, settings, picked }) {
       </div>
       <${Num} cls="field--price" group suffix=${settings.currency} value=${value ?? ''} placeholder=${fmtInt(price.auto)}
         aria=${COAT_LABEL[coat] + ': цена вручную'} onChange=${onChange} />
+      ${Math.round(price.exact) !== Math.round(price.final) ? html`
+        <p class="price__exact">без округления <b>${fmtPrice(price.exact, settings.currency)}</b></p>` : null}
     </div>`;
 }
 
@@ -476,6 +482,23 @@ function Summary({ draft, settings, totals, upDraft, onSave, notice, onNotice })
           <${PriceTile} key=${c} coat=${c} price=${totals.price[c]} settings=${settings} picked=${draft.coat === c}
             value=${draft.manual[c]} onChange=${(v) => upDraft((d) => { d.manual[c] = v; })} />`)}
       </div>
+      <div class="round">
+        <div class="round__head">
+          <span class="eyebrow">Округление</span>
+          ${draft.round.step != null || draft.round.dir != null ? html`
+            <button type="button" class="link-btn" onClick=${() => upDraft((d) => { d.round = { step: null, dir: null }; })}>как в настройках</button>` : null}
+        </div>
+        <div class="chips chips--tight">
+          ${ROUND_STEPS.map((v) => html`
+            <button type="button" key=${v} class=${'chip chip--num' + (totals.round.step === v ? ' is-on' : '')}
+              onClick=${() => upDraft((d) => { d.round.step = v; })}>${v === 1 ? 'точно' : fmtInt(v)}</button>`)}
+        </div>
+        <div class="seg seg--mini" role="radiogroup" aria-label="Куда округлять">
+          ${ROUND_DIRS.map(([v, l, hint]) => html`
+            <button type="button" role="radio" aria-checked=${totals.round.dir === v ? 'true' : 'false'} title=${hint}
+              class=${'seg__btn' + (totals.round.dir === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.round.dir = v; })}>${l}</button>`)}
+        </div>
+      </div>
       <p class="total__note">Нажмите на цену или ставку, чтобы указать свою. Пустое поле — расчёт по прайсу.</p>
     </div>`;
 }
@@ -526,7 +549,61 @@ function TemplateCard({ tpl, vars, settings, upSettings, toast, phone }) {
 // ── Страница «Расчёт» и страница заказа ──────────────────────────
 // Один и тот же набор блоков: на «Расчёте» это черновик, на странице заказа — правка конкретного заказа.
 
-function CalcPage({ variant = 'scratch', draft, settings, totals, vars, cost, hideCost, onHideCost, upDraft, upSettings, withUndo, toast, onNew, onSave, notice, onNotice, head, fact }) {
+const SHAPE_NAME = { rect: 'Прямоугольник', circle: 'Круг', trap: 'Трапеция', poly: 'Своя форма', custom: 'По площади' };
+
+function itemLabel(it) {
+  const dims = it.shape === 'rect' ? `${fmtInt(it.l)}×${fmtInt(it.w)}`
+    : it.shape === 'circle' ? `⌀${fmtInt(it.d)}`
+    : it.shape === 'trap' ? (it.four ? `${fmtInt(it.a)}/${fmtInt(it.b)}, грани ${fmtInt(it.s1)}/${fmtInt(it.s2)}` : `${fmtInt(it.a)}→${fmtInt(it.b)}, длина ${fmtInt(it.h)}`)
+    : it.shape === 'poly' ? `${(it.pts || []).length} углов` : `${fmtNum(it.area)} м²`;
+  return { title: (it.name || '').trim() || SHAPE_NAME[it.shape], dims };
+}
+
+/** Краткое содержание сохранённого расчёта: что именно считали. Полный расчёт открывается отдельно. */
+function OrderRecap({ no, draft, settings, totals, onOpen }) {
+  const cur = settings.currency;
+  const items = draft[draft.mode];
+  const fin = pickMaterial(settings.cost, draft.coat, draft.finish?.[draft.coat]);
+  const stain = draft.stain?.on ? pickMaterial(settings.cost, 'stain', draft.stain.id) : null;
+  const svc = orderServices(draft, settings);
+  const tp = travelPlan(draft, settings.cost);
+  const tags = [
+    `Покрыть: ${fin?.name || (draft.coat === 'lacquer' ? 'лак' : 'масло')}`,
+    `Было: ${draft.current === 'lacquer' ? 'лак' : 'масло'}`,
+    draft.stain?.on ? `Покраска${stain?.name ? ': ' + stain.name : ''}` : null,
+    ...svc.map((x) => normKey(x.key) || x.name),
+    tp.dist > 0 ? `Выезд ${fmtInt(tp.km)} км${draft.travel.charge ? ' · в цене' : ''}` : null,
+    draft.night?.on ? `Ночная ×${fmtNum(num(draft.night.k))}` : null,
+  ].filter(Boolean);
+  return html`
+    <section class="section">
+      <header class="section__head">
+        <span class="section__no">${no}</span>
+        <div class="section__title"><h2>Расчёт</h2><p>Как сохранено. Чтобы изменить размеры или покрытие — откройте расчёт</p></div>
+        <button type="button" class="btn btn--ghost btn--sm" onClick=${onOpen}>${Icon.pen()}<span>Открыть расчёт</span></button>
+      </header>
+      <div class="card recap">
+        <div class="recap__items">
+          ${items.map((it) => { const g = itemGeometry(it), l = itemLabel(it); return html`
+            <div class="recap__row" key=${it.id}>
+              <span class="recap__name">${l.title}<i>${l.dims}${g.qty !== 1 ? ` · ${fmtInt(g.qty)} шт` : ''}</i></span>
+              <b>${fmtArea(g.total)} м²</b>
+            </div>`; })}
+        </div>
+        <div class="chips chips--static">${tags.map((t) => html`<span class="tag">${t}</span>`)}</div>
+        <div class="recap__prices">
+          <div><span>Лак</span><b>${fmtPrice(totals.price.lacquer.final, cur)}</b></div>
+          <div><span>Масло</span><b>${fmtPrice(totals.price.oil.final, cur)}</b></div>
+          <div><span>Всего</span><b>${fmtArea(totals.area.total)} м²</b></div>
+        </div>
+      </div>
+    </section>`;
+}
+
+// ── Страница «Расчёт» и страница заказа ──────────────────────────
+// Один и тот же набор блоков: на «Расчёте» это черновик, на странице заказа — правка конкретного заказа.
+
+function CalcPage({ variant = 'scratch', draft, settings, totals, vars, cost, hideCost, onHideCost, upDraft, upSettings, withUndo, toast, onNew, onSave, notice, onNotice, head, fact, client, calcOpen = true, onCalcOpen, textsOpen = true, onTextsOpen }) {
   const summaryRef = useRef(null);
   const [barHidden, setBarHidden] = useState(false);
   const [polyEdit, setPolyEdit] = useState(null);
@@ -543,15 +620,6 @@ function CalcPage({ variant = 'scratch', draft, settings, totals, vars, cost, hi
   const n = (i) => String(i + (fact ? 1 : 0)).padStart(2, '0');
   const editItem = polyEdit ? draft[polyEdit.kind].find((x) => x.id === polyEdit.id) : null;
   const onEditPoly = (kind, id) => setPolyEdit({ kind, id });
-  const client = html`
-    <${ClientSection} no=${order ? n(1) : '04'} draft=${draft} upDraft=${upDraft}
-      sub=${order ? 'Контакты и заметки по заказу' : 'Необязательно — можно указать позже, уже в заказе'}
-      footer=${order ? null : html`
-        <div class="client__save">
-          <p>Расчёт попадёт во вкладку «Заказы». Данные клиента можно добавить там позже.</p>
-          <button type="button" class="btn btn--primary" disabled=${!(totals.area.total > 0)} onClick=${onSave}>
-            ${Icon.save()}<span>Сохранить в заказы</span></button>
-        </div>`} />`;
 
   return html`
     <div class="layout">
@@ -559,25 +627,41 @@ function CalcPage({ variant = 'scratch', draft, settings, totals, vars, cost, hi
         ${order ? head : null}
         ${order ? fact : null}
         ${order ? client : null}
-        <div class="calc-top">
-          <${ModeSwitch} draft=${draft} settings=${settings} upDraft=${upDraft} />
-          ${!order ? html`
-            <button type="button" class="clear-btn" onClick=${onNew} title="Очистить всё и начать новый расчёт">
-              ${Icon.reset()}<span>Очистить всё</span>
-            </button>` : null}
-        </div>
-        <${Section} key=${draft.mode} no=${order ? n(2) : '01'} kind=${draft.mode} items=${draft[draft.mode]} settings=${settings}
-          upDraft=${upDraft} withUndo=${withUndo} onEditPoly=${onEditPoly} />
-        <${Finish} no=${order ? n(3) : '02'} draft=${draft} settings=${settings} upDraft=${upDraft} />
-        <${Extras} no=${order ? n(4) : '03'} draft=${draft} settings=${settings} upDraft=${upDraft} />
-        ${order ? null : client}
+        ${order && !calcOpen ? html`<${OrderRecap} no=${n(2)} draft=${draft} settings=${settings} totals=${totals} onOpen=${() => onCalcOpen(true)} />` : html`
+          <div class="calc-top">
+            <${ModeSwitch} draft=${draft} settings=${settings} upDraft=${upDraft} />
+            ${!order ? html`
+              <button type="button" class="clear-btn" onClick=${onNew} title="Очистить всё и начать новый расчёт">
+                ${Icon.reset()}<span>Очистить всё</span>
+              </button>` : html`
+              <button type="button" class="clear-btn" onClick=${() => onCalcOpen(false)} title="Свернуть расчёт">
+                ${Icon.up()}<span>Свернуть расчёт</span>
+              </button>`}
+          </div>
+          <${Section} key=${draft.mode} no=${order ? n(2) : '01'} kind=${draft.mode} items=${draft[draft.mode]} settings=${settings}
+            upDraft=${upDraft} withUndo=${withUndo} onEditPoly=${onEditPoly} />
+          <${Finish} no=${order ? n(3) : '02'} draft=${draft} settings=${settings} upDraft=${upDraft} />
+          <${Extras} no=${order ? n(4) : '03'} draft=${draft} settings=${settings} upDraft=${upDraft} />`}
+        ${!order ? html`
+          <div class="card savecard">
+            <div><h3>Сохранить расчёт</h3><p>Он появится во вкладке «Заказы», и к нему можно будет вернуться. Клиента и факт выполнения добавите там.</p></div>
+            <button type="button" class="btn btn--primary" disabled=${!(totals.area.total > 0)} onClick=${onSave}>
+              ${Icon.save()}<span>Сохранить в заказы</span></button>
+          </div>` : null}
       </div>
 
       <aside class="layout__aside" id="summary" ref=${summaryRef}>
         <${Summary} draft=${draft} settings=${settings} totals=${totals} upDraft=${upDraft} onSave=${order ? null : onSave} notice=${notice} onNotice=${onNotice} />
         <${NormPanel} cost=${cost} settings=${settings} hidden=${hideCost} onToggle=${onHideCost} />
-        ${settings.templates.map((tpl) => html`
-          <${TemplateCard} key=${tpl.id} tpl=${tpl} vars=${vars} settings=${settings} upSettings=${upSettings} toast=${toast} phone=${draft.client.phone} />`)}
+        ${textsOpen ? html`
+          ${order ? html`<button type="button" class="link-btn link-btn--block" onClick=${() => onTextsOpen(false)}>Скрыть тексты для клиента</button>` : null}
+          ${settings.templates.map((tpl) => html`
+            <${TemplateCard} key=${tpl.id} tpl=${tpl} vars=${vars} settings=${settings} upSettings=${upSettings} toast=${toast} phone=${draft.client.phone} />`)}`
+          : html`
+          <div class="card tpl tpl--hidden">
+            <div class="tpl__head"><span class="eyebrow">Тексты для клиента</span>
+              <button type="button" class="btn btn--ghost btn--sm" onClick=${() => onTextsOpen(true)}>Показать</button></div>
+          </div>`}
       </aside>
     </div>
 
@@ -628,11 +712,14 @@ function OrderHead({ order, draft, onStatus, onDuplicate, onDelete }) {
     </div>`;
 }
 
-function OrderPage({ order, settings, upSettings, getOrder, putOrder, toast, hideCost, onHideCost, onDuplicate, onDelete }) {
+function OrderPage({ order, settings, upSettings, actual, getOrder, putOrder, toast, hideCost, onHideCost, onDuplicate, onDelete }) {
   const draft = useMemo(() => normalizeDraft(order.draft, settings), [order.draft, settings]);
   const totals = useMemo(() => calcTotals(draft, settings), [draft, settings]);
   const vars = useMemo(() => templateVars(totals, settings), [totals, settings]);
-  const cost = useMemo(() => calcCost(draft, settings, totals), [draft, settings, totals]);
+  const cost = useMemo(() => calcCost(draft, settings, totals, actual), [draft, settings, totals, actual]);
+  // Выполненный заказ открывается свёрнутым: только то, что сохранено; расчёт и тексты — по кнопке.
+  const [calcOpen, setCalcOpen] = useState(!order.fact);
+  const [textsOpen, setTextsOpen] = useState(!order.fact);
 
   // Каждая правка сразу записывается в заказ; цены в карточке заказа пересчитываются.
   const write = (cur, d) => {
@@ -650,10 +737,11 @@ function OrderPage({ order, settings, upSettings, getOrder, putOrder, toast, hid
   const onFact = (fact) => putOrder({ ...getOrder(), fact, updatedAt: Date.now() });
   const setStatus = (done) => {
     const cur = getOrder();
-    if (done && !cur.fact) putOrder({ ...cur, fact: startFact(cur, settings), updatedAt: Date.now() });
+    if (done && !cur.fact) { putOrder({ ...cur, fact: startFact(cur, settings), updatedAt: Date.now() }); setCalcOpen(false); setTextsOpen(false); }
     if (!done && cur.fact) {
       const prev = cur.fact;
       putOrder({ ...cur, fact: null, updatedAt: Date.now() });
+      setCalcOpen(true); setTextsOpen(true);
       toast('Заказ убран из статистики', () => putOrder({ ...getOrder(), fact: prev, updatedAt: Date.now() }));
     }
   };
@@ -669,7 +757,8 @@ function OrderPage({ order, settings, upSettings, getOrder, putOrder, toast, hid
   return html`
     <${CalcPage} variant="order" draft=${draft} settings=${settings} totals=${totals} vars=${vars} cost=${cost}
       hideCost=${hideCost} onHideCost=${onHideCost} upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast}
-      notice=${notice} onNotice=${onNotice}
+      notice=${notice} onNotice=${onNotice} calcOpen=${calcOpen} onCalcOpen=${setCalcOpen} textsOpen=${textsOpen} onTextsOpen=${setTextsOpen}
+      client=${html`<${ClientSection} no=${order.fact ? '02' : '01'} draft=${draft} upDraft=${upDraft} sub="Контакты и заметки по заказу" />`}
       head=${html`<${OrderHead} order=${order} draft=${draft} onStatus=${setStatus}
         onDuplicate=${() => onDuplicate(order)} onDelete=${() => onDelete(order)} />`}
       fact=${order.fact ? html`<${FactSection} no="01" order=${order} settings=${settings} onFact=${onFact} />` : null} />`;
@@ -677,7 +766,7 @@ function OrderPage({ order, settings, upSettings, getOrder, putOrder, toast, hid
 
 // ── Страница «Заказы» ───────────────────────────────────────────
 
-function RecentCard({ entry, settings, orderExists, onOpen, onSave, onDelete }) {
+function RecentCard({ entry, settings, orderExists, onOpen, onOpenOrder, onSave, onDelete }) {
   const d = entry.draft;
   const mode = d.mode === 'stairs' ? 'stairs' : 'surfaces';
   const items = d[mode] || [];
@@ -701,8 +790,9 @@ function RecentCard({ entry, settings, orderExists, onOpen, onSave, onDelete }) 
         <div><span>Масло</span><b>${fmtPrice(entry.totals?.oil, settings.currency)}</b></div>
       </div>
       <div class="order__actions">
-        <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(entry)}>${linked ? 'Открыть заказ' : 'Открыть расчёт'}</button>
-        ${!linked ? html`<button type="button" class="btn btn--ghost btn--sm" onClick=${() => onSave(entry)}>${Icon.save()}<span>В заказы</span></button>` : null}
+        <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(entry)}>Открыть расчёт</button>
+        ${linked ? html`<button type="button" class="btn btn--ghost btn--sm" onClick=${() => onOpenOrder(entry.orderId)}>${Icon.arrow()}<span>Заказ</span></button>`
+          : html`<button type="button" class="btn btn--ghost btn--sm" onClick=${() => onSave(entry)}>${Icon.save()}<span>В заказы</span></button>`}
         <span class="order__spacer"></span>
         <button type="button" class="icon-btn" title="Убрать из последних" aria-label="Убрать из последних" onClick=${() => onDelete(entry)}>${Icon.x()}</button>
       </div>
@@ -730,7 +820,7 @@ function OrdersPage({ orders, recent, settings, view, setView, onOpen, onDelete,
   const TITLE = {
     quotes: 'Сохранённые расчёты и заказы в работе. В статистику входят, когда у заказа статус «Выполнен»',
     done: 'Выполненные заказы — из них считается статистика',
-    recent: 'Временная история: хранятся последние 10 расчётов. Чтобы расчёт не пропал — сохраните его в заказы',
+    recent: 'Временная история: последние 10 расчётов. Нажмите — расчёт откроется на вкладке «Расчёт» в том же состоянии',
   };
 
   return html`
@@ -768,7 +858,7 @@ function OrdersPage({ orders, recent, settings, view, setView, onOpen, onDelete,
           <div class="orders">
             ${recent.map((e) => html`
               <${RecentCard} key=${e.rid} entry=${e} settings=${settings} orderExists=${liveIds.has(e.orderId)}
-                onOpen=${onOpenRecent} onSave=${onSaveRecent} onDelete=${onDeleteRecent} />`)}
+                onOpen=${onOpenRecent} onOpenOrder=${(id) => onOpen({ id })} onSave=${onSaveRecent} onDelete=${onDeleteRecent} />`)}
           </div>` : html`
         <div class="orders">
           ${list.map((o) => {
@@ -921,11 +1011,18 @@ function PricesPage({ settings, upSettings, cloud, toast, onImport, orders }) {
           </div>
           <hr class="rule" />
           <div class="setting">
-            <div><h3>Округление цены</h3><p>Итог округляется до ближайшего значения</p></div>
-            <div class="chips">
-              ${[1, 50, 100, 500, 1000].map((v) => html`
-                <button type="button" class=${'chip chip--num' + (num(settings.rounding) === v ? ' is-on' : '')}
-                  onClick=${() => upSettings((s) => { s.rounding = v; })}>${v === 1 ? 'до рубля' : fmtInt(v)}</button>`)}
+            <div><h3>Округление по умолчанию</h3><p>В самом расчёте шаг и направление меняются отдельно для каждого заказа</p></div>
+            <div class="round-set">
+              <div class="chips">
+                ${[1, 100, 500, 1000, 5000, 10000].map((v) => html`
+                  <button type="button" class=${'chip chip--num' + (num(settings.rounding) === v ? ' is-on' : '')}
+                    onClick=${() => upSettings((s) => { s.rounding = v; })}>${v === 1 ? 'точно' : fmtInt(v)}</button>`)}
+              </div>
+              <div class="seg seg--mini">
+                ${ROUND_DIRS.map(([v, l, hint]) => html`
+                  <button type="button" title=${hint} class=${'seg__btn' + ((settings.roundingDir || 'near') === v ? ' is-on' : '')}
+                    onClick=${() => upSettings((s) => { s.roundingDir = v; })}>${l}</button>`)}
+              </div>
             </div>
           </div>
         </div>
@@ -1145,7 +1242,8 @@ function App() {
 
   const totals = useMemo(() => calcTotals(draft, settings), [draft, settings]);
   const vars = useMemo(() => templateVars(totals, settings), [totals, settings]);
-  const cost = useMemo(() => calcCost(draft, settings, totals), [draft, settings, totals]);
+  const actualStats = useMemo(() => aggregateStats(orders, settings.cost), [orders, settings.cost]);
+  const cost = useMemo(() => calcCost(draft, settings, totals, actualStats), [draft, settings, totals, actualStats]);
   const live = useRef({ draft, totals });
   live.current = { draft, totals };
 
@@ -1155,7 +1253,9 @@ function App() {
     if (!(t.area.total > 0)) return;
     const prev = recentRef.current.find((e) => e.rid === d.rid);
     if (prev && !extra.orderId && JSON.stringify(prev.draft) === JSON.stringify(d)) return;
-    const entry = { rid: d.rid, updatedAt: Date.now(), draft: structuredClone(d), totals: orderTotals(t), orderId: extra.orderId || prev?.orderId };
+    // Связь с заказом сохраняется, только если расчёт не менялся: после правок это уже другой расчёт.
+    const same = prev && JSON.stringify(prev.draft) === JSON.stringify(d);
+    const entry = { rid: d.rid, updatedAt: Date.now(), draft: structuredClone(d), totals: orderTotals(t), orderId: extra.orderId || (same ? prev.orderId : undefined) };
     const next = upsertRecent(recentRef.current, entry);
     recentRef.current = next;
     setRecent(next);
@@ -1209,7 +1309,6 @@ function App() {
     go('#order/' + order.id);
   };
   const onOpenRecent = (entry) => {
-    if (entry.orderId && getOrder(entry.orderId)) { go('#order/' + entry.orderId); return; }
     commitRecent();
     setDraft(normalizeDraft(entry.draft, settings));
     go('#calc');
@@ -1342,7 +1441,7 @@ function App() {
         <${CalcPage} draft=${draft} settings=${settings} totals=${totals} vars=${vars} cost=${cost} hideCost=${hideCost} onHideCost=${onHideCost}
           upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast} onNew=${onNew} onSave=${onSave} />` : null}
       ${tab === 'order' && openOrder ? html`
-        <${OrderPage} key=${openOrder.id} order=${openOrder} settings=${settings} upSettings=${upSettings}
+        <${OrderPage} key=${openOrder.id} order=${openOrder} settings=${settings} upSettings=${upSettings} actual=${actualStats}
           getOrder=${() => getOrder(openOrder.id)} putOrder=${putOrder} toast=${toast} hideCost=${hideCost} onHideCost=${onHideCost}
           onDuplicate=${onDuplicateOrder} onDelete=${onDeleteOrder} />` : null}
       ${tab === 'order' && !openOrder ? html`
@@ -1356,7 +1455,7 @@ function App() {
           onOpenRecent=${onOpenRecent} onSaveRecent=${onSaveRecent} onDeleteRecent=${onDeleteRecent} />` : null}
       ${tab === 'stats' ? html`<${StatsPage} orders=${orders} settings=${settings} />` : null}
       ${topTab(tab) === 'prices' ? html`<${SettingsNav} tab=${tab} />` : null}
-      ${tab === 'cost' ? html`<div class="page"><${CostPage} settings=${settings} upSettings=${upSettings} /></div>` : null}
+      ${tab === 'cost' ? html`<div class="page"><${CostPage} settings=${settings} upSettings=${upSettings} stats=${actualStats} /></div>` : null}
       ${tab === 'prices' ? html`
         <${PricesPage} settings=${settings} upSettings=${upSettings} cloud=${cloud} toast=${toast} onImport=${onImport} orders=${orders} />` : null}
       ${tab === 'texts' ? html`

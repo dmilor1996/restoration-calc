@@ -166,6 +166,22 @@ export function roundTo(value, step) {
   return Math.round(value / s) * s;
 }
 
+/** Округление до шага: near — к ближайшему, down — вниз, up — вверх. */
+export function roundDir(value, step, dir = 'near') {
+  const s = num(step) || 1, q = value / s;
+  const r = dir === 'down' ? Math.floor(q + 1e-9) : dir === 'up' ? Math.ceil(q - 1e-9) : Math.round(q);
+  return r * s;
+}
+
+/** Округление расчёта: своё, если задано в самом расчёте, иначе из настроек. */
+export function roundingOf(draft, settings) {
+  const own = draft?.round || {};
+  return {
+    step: isSet(own.step) ? Math.max(1, num(own.step)) : Math.max(1, num(settings.rounding) || 1),
+    dir: ['down', 'up', 'near'].includes(own.dir) ? own.dir : (settings.roundingDir || 'near'),
+  };
+}
+
 /** Главный расчёт: площади, применённые ставки, итоговые цены. */
 export function calcTotals(draft, settings) {
   const mode = draft.mode === 'stairs' ? 'stairs' : 'surfaces';
@@ -201,22 +217,25 @@ export function calcTotals(draft, settings) {
   // Доплата за выезд (если включена в расчёте): по тарифу за км или своей суммой.
   const tp = travelPlan(draft, settings.cost);
   const travel = has && draft.travel?.charge
-    ? (isSet(draft.travel.amount) ? num(draft.travel.amount) : roundTo(tp.tariff, settings.rounding)) : 0;
+    ? (isSet(draft.travel.amount) ? num(draft.travel.amount) : tp.tariff) : 0;
   // Покраска морилкой: цена за м² прибавляется к обоим покрытиям.
-  const stain = has && draft.stain?.on ? roundTo(area.total * num(settings.cost?.stainPrice), settings.rounding) : 0;
+  const stain = has && draft.stain?.on ? area.total * num(settings.cost?.stainPrice) : 0;
+  const rnd = roundingOf(draft, settings);
   const price = {};
   // Масло считается первым: цена лака зависит от него (минимальная разница).
   for (const c of COATS) {
     const base = area.surfaces * sections.surfaces.rate[c] + area.stairs * sections.stairs.rate[c];
-    const calc = roundTo(base * k, settings.rounding);
-    let auto = calc, note = '';
-    if (auto < minOrder) { auto = minOrder; note = 'min'; }
-    auto += travel + stain;
-    if (c === 'lacquer' && minDiff > 0 && auto < price.oil.final + minDiff) { auto = price.oil.final + minDiff; note = 'diff'; }
+    let work = base * k, note = '';
+    if (work < minOrder) { work = minOrder; note = 'min'; }
+    let exact = work + travel + stain;                 // цена без округления
+    let auto = roundDir(exact, rnd.step, rnd.dir);
+    if (c === 'lacquer' && minDiff > 0 && auto < price.oil.final + minDiff) {
+      auto = roundDir(price.oil.final + minDiff, rnd.step, 'up'); exact = auto; note = 'diff';
+    }
     const manual = draft.manual?.[c];
-    price[c] = { base, calc, auto, note, manual: isSet(manual), final: isSet(manual) ? num(manual) : auto };
+    price[c] = { base, exact, calc: auto, auto, note, manual: isSet(manual), final: isSet(manual) ? num(manual) : auto };
   }
-  return { area, sections, k, price, travel, stain, mode };
+  return { area, sections, k, price, travel, stain, mode, round: rnd };
 }
 
 // ── Себестоимость и нормочас ────────────────────────────────────
@@ -244,10 +263,12 @@ export function usedMaterials(draft, cost, coat) {
   if (draft?.stain?.on) { const st = pickMaterial(cost, 'stain', draft.stain.id); if (st) list.push(st); }
   return list.concat(materialsOfKind(cost, 'extra'));
 }
-/** Часы шлифовки: старый лак шлифуется в sandLacquerK раз дольше масла. */
+/** Часы шлифовки: норма в минутах на м² зависит от того, что на поверхности сейчас. */
 export function sandHours(area, current, time) {
-  return area * num(time?.sand) * (current === 'lacquer' ? Math.max(1, num(time?.sandLacquerK) || 1) : 1);
+  return (area * num(current === 'lacquer' ? time?.sandMin?.lacquer : time?.sandMin?.oil)) / 60;
 }
+/** Время услуги в часах (в настройках — в минутах). */
+export const svcHours = (s) => num(s.min) / 60;
 
 /** Дорога: километры туда-обратно, время в пути, себестоимость машины и сумма по тарифу для клиента. */
 export function travelPlan(draft, cost) {
@@ -270,13 +291,13 @@ export function orderServices(draft, settings) {
  *   прибыль = выручка − себестоимость;  «ваш час» = прибыль / время
  *   цена по желаемому/минимальному часу = время × час + себестоимость
  */
-export function calcCost(draft, settings, totals) {
+export function calcCost(draft, settings, totals, actual) {
   const cost = settings.cost;
   const area = totals.area.total;
   const tp = travelPlan(draft, cost);
   const services = orderServices(draft, settings);
   const servicesRevenue = services.reduce((s, x) => s + num(x.price), 0);
-  const servicesHours = services.reduce((s, x) => s + num(x.hours), 0);
+  const servicesHours = services.reduce((s, x) => s + svcHours(x), 0);
   const rateTarget = num(cost.rateTarget), rateMin = num(cost.rateMin);
   const stainOn = !!draft.stain?.on && area > 0;
   const selected = draft.coat === 'lacquer' ? 'lacquer' : 'oil';
@@ -286,9 +307,9 @@ export function calcCost(draft, settings, totals) {
     const t = cost.time[c] || {};
     const hours = {
       sand: sandHours(area, draft.current, cost.time),
-      coat: area * num(t.coat),
-      fixed: area > 0 ? num(t.fixed) : 0,
-      stain: stainOn ? area * num(cost.time.stain?.coat) + num(cost.time.stain?.fixed) : 0,
+      coat: (area * num(t.coatMin)) / 60,
+      fixed: area > 0 ? num(t.fixedMin) / 60 : 0,
+      stain: stainOn ? (area * num(cost.time.stain?.coatMin) + num(cost.time.stain?.fixedMin)) / 60 : 0,
       services: servicesHours, travel: tp.hours,
     };
     hours.work = hours.sand + hours.coat + hours.fixed;
@@ -312,6 +333,18 @@ export function calcCost(draft, settings, totals) {
         min: (hours.work * rateMin + materialsWork) / area,
       } : null,
     };
+    // Оценка по фактическим средним из выполненных заказов (шлифовка по старому покрытию, нанесение вместе с подготовкой).
+    const aSand = actual?.sand?.[draft.current === 'lacquer' ? 'lacquer' : 'oil'];
+    const aCoat = actual?.coat?.[c];
+    if (area > 0 && (aSand?.n || aCoat?.n)) {
+      const sandH = aSand?.n ? area * aSand.perM2 : hours.sand;
+      const coatH = aCoat?.n ? area * aCoat.perM2 : hours.coat + hours.fixed;
+      const total = sandH + coatH + hours.stain + hours.services + hours.travel;
+      out.coats[c].actual = {
+        hours: total, rate: total > 0 ? profit / total : 0, priceTarget: total * rateTarget + expenses,
+        nSand: aSand?.n || 0, nCoat: aCoat?.n || 0,
+      };
+    }
   }
 
   // Подсказка по выезду: сколько добавить, чтобы с дорогой выйти на желаемый час (для выбранного покрытия).
@@ -354,23 +387,26 @@ export function upsertRecent(list, entry, max = 10) {
 }
 
 /** Сводная статистика по выполненным заказам. */
-export function aggregateStats(orders) {
+export function aggregateStats(orders, cost) {
   const done = (orders || []).filter((o) => !o.deleted && o.fact);
   // rateProfit/rateHours — только заказы с указанным временем: без времени час посчитать нельзя.
   const sum = { count: 0, received: 0, profit: 0, hours: 0, area: 0, expenses: 0, stages: 0, rateProfit: 0, rateHours: 0, noTime: 0 };
-  const acc = () => ({ h: 0, area: 0, n: 0 });
+  const acc = () => ({ h: 0, area: 0, n: 0, plan: 0 });
   const sand = { oil: acc(), lacquer: acc() }, coat = { oil: acc(), lacquer: acc() }, stain = acc();
   const services = {}, materials = {}, months = {};
-  const add = (a, hrs, area) => { if (hrs > 0 && area > 0) { a.h += hrs; a.area += area; a.n++; } };
+  // plan — сколько часов дали бы нормы из настроек на те же заказы: сравнение «факт против нормы» честное при любой площади
+  const add = (a, hrs, area, plan = 0) => { if (hrs > 0 && area > 0) { a.h += hrs; a.area += area; a.n++; a.plan += plan; } };
+  const T = cost?.time;
   for (const o of done) {
     const f = o.fact, fs = factSummary(o), h = f.hours || {};
     sum.count++; sum.received += fs.received; sum.profit += fs.profit; sum.hours += fs.hours; sum.area += fs.area; sum.expenses += fs.expenses;
     if (fs.hours > 0) { sum.rateProfit += fs.profit; sum.rateHours += fs.hours; } else sum.noTime++;
     if (fs.byStages) {
       sum.stages++;
-      add(sand[f.old === 'lacquer' ? 'lacquer' : 'oil'], num(h.sand), fs.area);
-      add(coat[f.coat === 'lacquer' ? 'lacquer' : 'oil'], num(h.coat), fs.area);
-      add(stain, num(h.stain), fs.area);
+      const old = f.old === 'lacquer' ? 'lacquer' : 'oil', nc = f.coat === 'lacquer' ? 'lacquer' : 'oil';
+      add(sand[old], num(h.sand), fs.area, T ? (fs.area * num(T.sandMin?.[old])) / 60 : 0);
+      add(coat[nc], num(h.coat), fs.area, T ? (fs.area * num(T[nc]?.coatMin) + num(T[nc]?.fixedMin)) / 60 : 0);
+      add(stain, num(h.stain), fs.area, T ? (fs.area * num(T.stain?.coatMin) + num(T.stain?.fixedMin)) / 60 : 0);
       for (const [id, v] of Object.entries(h.services || {})) {
         if (num(v) > 0) { services[id] ||= { hours: 0, n: 0 }; services[id].hours += num(v); services[id].n++; }
       }
@@ -386,7 +422,7 @@ export function aggregateStats(orders) {
     if (fs.hours > 0) { m.rateProfit += fs.profit; m.rateHours += fs.hours; }
   }
   const div = (a, b) => (b > 0 ? a / b : 0);
-  const norm = (a) => ({ n: a.n, perM2: div(a.h, a.area) });
+  const norm = (a) => ({ n: a.n, perM2: div(a.h, a.area), planPerM2: div(a.plan, a.area) });
   return {
     ...sum,
     avgCheck: div(sum.received, sum.count), avgPerM2: div(sum.received, sum.area), avgRate: div(sum.rateProfit, sum.rateHours),

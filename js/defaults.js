@@ -28,12 +28,11 @@ export function defaultCost() {
   return {
     rateTarget: 4000,     // желаемый нормочас
     rateMin: 2500,        // ниже этого часа не опускаться
-    time: {
-      sand: 0.5,          // шлифовка, часов на м² — когда сейчас на поверхности масло
-      sandLacquerK: 2,    // во сколько раз дольше, если сейчас старый лак
-      oil: { coat: 0.25, fixed: 0.5 },      // нанесение: часов на м² и часов на заказ (подготовка, уборка, сушка)
-      lacquer: { coat: 0.5, fixed: 1.5 },
-      stain: { coat: 0.2, fixed: 0.25 },    // покраска морилкой
+    time: {               // всё в минутах
+      sandMin: { oil: 30, lacquer: 60 },    // шлифовка 1 м² старого покрытия: сейчас масло / сейчас лак
+      oil: { coatMin: 15, fixedMin: 30 },   // нанесение: минут на м² и минут на заказ (подготовка, уборка, сушка)
+      lacquer: { coatMin: 30, fixedMin: 90 },
+      stain: { coatMin: 12, fixedMin: 15 }, // покраска морилкой
     },
     stainPrice: 3000,     // цена покраски клиенту, ₽/м²
     materials: [          // kind: oil | lacquer | stain | extra (расходник, добавляется всегда)
@@ -54,15 +53,16 @@ export function defaultSettings() {
       stairs: [{ id: 't0', from: 0, to: '', oil: 14000, lacquer: 17000 }],
     },
     tierBy: 'total',      // 'total' — по всей площади заказа, 'section' — по площади раздела
-    rounding: 100,
+    rounding: 100,        // шаг округления по умолчанию, ₽ (в расчёте его можно поменять)
+    roundingDir: 'near',  // near — ближайшее, down — вниз, up — вверх
     minDiff: 5000,        // лак не дешевле масла на эту сумму (0 — не применять)
     minOrder: 0,          // минимальная стоимость заказа (0 — не применять)
     currency: '₽',
     nightK: 1.5,
     edgeThickness: 40,
     services: [
-      { id: 'sink', key: 'раковина', name: 'Раковина: снятие и установка с герметизацией', price: 6000, hours: 1 },
-      { id: 'stove', key: 'плита', name: 'Плита: снятие и установка', price: 1000, hours: 0.25 },
+      { id: 'sink', key: 'раковина', name: 'Раковина: снятие и установка с герметизацией', price: 6000, min: 60 },
+      { id: 'stove', key: 'плита', name: 'Плита: снятие и установка', price: 1000, min: 15 },
     ],
     cost: defaultCost(),
     templates: structuredClone(DEFAULT_TEMPLATES),
@@ -85,6 +85,7 @@ export function defaultDraft(settings) {
   return {
     v: 1,
     id: null,
+    round: { step: null, dir: null },     // округление этого расчёта (null — как в настройках)
     rid: uid(),                           // номер расчёта в «Последних»: правки того же расчёта обновляют одну запись
     mode: 'surfaces',                     // что считаем: surfaces | stairs
     current: 'oil',                       // что на поверхности сейчас: oil | lacquer (влияет на шлифовку)
@@ -103,6 +104,24 @@ export function defaultDraft(settings) {
 }
 
 /** Аккуратно дополняет сохранённые настройки недостающими полями. */
+/** Нормы времени: прежние версии хранили часы (и коэффициент для лака) — переводим в минуты. */
+function migrateTime(t, dt) {
+  const has = (v) => v !== undefined && v !== null && v !== '';
+  const m = (v) => Math.round(Number(v) * 60);
+  const oldSand = has(t.sand) ? t.sand : t.oil?.sand;      // часов/м², старое масло
+  const k = has(t.sandLacquerK) ? Number(t.sandLacquerK) : 2;
+  const pick = (cur, hours, def) => (has(cur) ? cur : has(hours) ? m(hours) : def);
+  return {
+    sandMin: {
+      oil: pick(t.sandMin?.oil, oldSand, dt.sandMin.oil),
+      lacquer: has(t.sandMin?.lacquer) ? t.sandMin.lacquer : has(oldSand) ? m(oldSand * k) : dt.sandMin.lacquer,
+    },
+    oil: { coatMin: pick(t.oil?.coatMin, t.oil?.coat, dt.oil.coatMin), fixedMin: pick(t.oil?.fixedMin, t.oil?.fixed, dt.oil.fixedMin) },
+    lacquer: { coatMin: pick(t.lacquer?.coatMin, t.lacquer?.coat, dt.lacquer.coatMin), fixedMin: pick(t.lacquer?.fixedMin, t.lacquer?.fixed, dt.lacquer.fixedMin) },
+    stain: { coatMin: pick(t.stain?.coatMin, t.stain?.coat, dt.stain.coatMin), fixedMin: pick(t.stain?.fixedMin, t.stain?.fixed, dt.stain.fixedMin) },
+  };
+}
+
 export function normalizeSettings(raw) {
   const d = defaultSettings();
   if (!raw || typeof raw !== 'object') return d;
@@ -114,19 +133,15 @@ export function normalizeSettings(raw) {
   }
   if (!Array.isArray(s.services)) s.services = d.services;
   if (!Array.isArray(s.templates)) s.templates = d.templates;
-  s.services = s.services.map((x) => ({ hours: d.services.find((y) => y.id === x.id)?.hours ?? 0, ...x }));
+  // Время услуг раньше хранилось в часах — переводим в минуты.
+  s.services = s.services.map(({ hours, ...x }) => ({
+    ...x, min: x.min ?? (hours != null && hours !== '' ? Math.round(Number(hours) * 60) : (d.services.find((y) => y.id === x.id)?.min ?? 0)),
+  }));
   const c = raw.cost || {};
   const t = c.time || {}, dt = d.cost.time;
   s.cost = {
     ...d.cost, ...c,
-    time: {
-      // Раньше шлифовка хранилась по виду нового покрытия — берём значение для масла.
-      sand: t.sand ?? t.oil?.sand ?? dt.sand,
-      sandLacquerK: t.sandLacquerK ?? dt.sandLacquerK,
-      oil: { ...dt.oil, coat: t.oil?.coat ?? dt.oil.coat, fixed: t.oil?.fixed ?? dt.oil.fixed },
-      lacquer: { ...dt.lacquer, coat: t.lacquer?.coat ?? dt.lacquer.coat, fixed: t.lacquer?.fixed ?? dt.lacquer.fixed },
-      stain: { ...dt.stain, ...(t.stain || {}) },
-    },
+    time: migrateTime(t, dt),
     materials: Array.isArray(c.materials)
       ? c.materials.map((m) => ({ ...m, kind: m.kind || (m.coat === 'both' ? 'extra' : m.coat) || 'oil' }))
       : d.cost.materials,
@@ -151,6 +166,7 @@ export function normalizeDraft(raw, settings) {
     ...d, ...raw,
     id: raw.id || null,
     rid: raw.rid || uid(),
+    round: { ...d.round, ...(raw.round || {}) },
     mode: draftMode(raw),
     finish: { ...d.finish, ...(raw.finish || {}) },
     stain: { ...d.stain, ...(raw.stain || {}) },
