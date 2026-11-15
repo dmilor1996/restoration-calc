@@ -6,6 +6,7 @@ import { normalizeSettings, normalizeDraft } from './defaults.js';
 const LS_SETTINGS = 'rc.settings.v1';
 const LS_DRAFT = 'rc.draft.v1';
 const LS_ORDERS = 'rc.orders.v1';
+const LS_RECENT = 'rc.recent.v1';
 const LS_THEME = 'rc.theme';
 
 function read(key) {
@@ -21,6 +22,9 @@ export const loadDraft = (settings) => normalizeDraft(read(LS_DRAFT), settings);
 export const saveDraft = (d) => write(LS_DRAFT, d);
 export const loadOrders = () => { const list = read(LS_ORDERS); return Array.isArray(list) ? list : []; };
 export const saveOrders = (list) => write(LS_ORDERS, list);
+// Последние расчёты хранятся только в этом браузере и в облако не уходят.
+export const loadRecent = () => { const list = read(LS_RECENT); return Array.isArray(list) ? list : []; };
+export const saveRecent = (list) => write(LS_RECENT, list);
 
 export function loadTheme() {
   try { return localStorage.getItem(LS_THEME) || 'auto'; } catch { return 'auto'; }

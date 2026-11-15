@@ -33,6 +33,8 @@ export const Icon = {
   chat: () => svg(html`<path d="M4 19.5 5.3 15A8 8 0 1 1 9 18.7z" />`, 18),
   save: () => svg(html`<path d="M5 4h11l3 3v13H5z" /><path d="M8 4v5h7V4M8 20v-6h8v6" />`, 18),
   search: () => svg(html`<circle cx="11" cy="11" r="6.5" /><path d="m16 16 4.5 4.5" />`, 18),
+  back: () => svg(html`<path d="M19 12H5m0 0 6-6m-6 6 6 6" />`, 18),
+  clock: () => svg(html`<circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" />`, 18),
   trash: () => svg(html`<path d="M4.5 7h15M9.5 7V4.5h5V7M7 7l.8 12.5h8.4L17 7" />`, 18),
 };
 

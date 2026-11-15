@@ -1,18 +1,18 @@
 import { html, render, useState, useEffect, useRef, useMemo } from './vendor/preact-htm.js';
 import {
   num, itemGeometry, shapeSides, shapeOutline, sectionArea, calcTotals, calcCost, travelPlan, factSummary, sortedTiers,
-  materialsOfKind, pickMaterial, materialCostPerM2,
+  materialsOfKind, pickMaterial, materialCostPerM2, upsertRecent,
   templateVars, templateParts, usedKeys, normKey,
   fmtArea, fmtInt, fmtNum, fmtPrice, plural,
 } from './calc.js';
 import { uid, newItem, defaultDraft, normalizeSettings, normalizeDraft, DEFAULT_TEMPLATES } from './defaults.js';
 import {
-  loadSettings, saveSettings, loadDraft, saveDraft, loadOrders, saveOrders, loadTheme, saveTheme,
+  loadSettings, saveSettings, loadDraft, saveDraft, loadOrders, saveOrders, loadRecent, saveRecent, loadTheme, saveTheme,
   cloudConfigured, initCloud, pushSettings, pushOrder, signIn, signOutCloud,
 } from './store.js';
 import { Icon, Num, Text, Stepper, Switch, AutoText, copyText } from './ui.js';
 import { Diagram, PolyEditor } from './diagram.js';
-import { NormPanel, CostPage, FactModal, StatsPage } from './cost.js';
+import { NormPanel, CostPage, FactSection, startFact, StatsPage } from './cost.js';
 
 // ── Справочники ─────────────────────────────────────────────────
 
@@ -274,16 +274,7 @@ function Finish({ no, draft, settings, upDraft }) {
       </header>
       <div class="card finish">
         <div class="setting">
-          <div><h3>Сейчас на поверхности</h3>
-            <p>${k > 1 ? `Старый лак шлифуется в ${fmtNum(k)} раза дольше масла` : 'От этого зависит время шлифовки'}</p></div>
-          <div class="seg">
-            ${[['oil', 'Масло'], ['lacquer', 'Лак']].map(([v, l]) => html`
-              <button type="button" class=${'seg__btn' + (draft.current === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.current = v; })}>${l}</button>`)}
-          </div>
-        </div>
-        <hr class="rule" />
-        <div class="setting">
-          <div><h3>Покрываем</h3><p>Для чего считаем себестоимость и прибыль</p></div>
+          <div><h3>Покрываем</h3><p>Для этого покрытия считаем себестоимость и прибыль</p></div>
           <div class="seg">
             ${[['oil', 'Масло-воск'], ['lacquer', 'Лак']].map(([v, l]) => html`
               <button type="button" class=${'seg__btn' + (coat === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.coat = v; })}>${l}</button>`)}
@@ -294,8 +285,17 @@ function Finish({ no, draft, settings, upDraft }) {
           : html`<p class="finish__one is-warn">Нет материала для этого покрытия — добавьте его в «Настройки → Себестоимость».</p>`}
         <hr class="rule" />
         <div class="setting">
-          <div><h3>Покраска морилкой</h3>
-            <p>${stainOn ? `Добавляется ${fmtInt(cost.stainPrice)} ${cur}/м², а время и материал идут в себестоимость` : 'Включите, если красите перед покрытием'}</p></div>
+          <div><h3>Сейчас на поверхности</h3>
+            <p>${k > 1 ? `Старый лак шлифуется в ${fmtNum(k)} раза дольше масла` : 'От этого зависит время шлифовки'}</p></div>
+          <div class="seg">
+            ${[['oil', 'Масло'], ['lacquer', 'Лак']].map(([v, l]) => html`
+              <button type="button" class=${'seg__btn' + (draft.current === v ? ' is-on' : '')} onClick=${() => upDraft((d) => { d.current = v; })}>${l}</button>`)}
+          </div>
+        </div>
+        <hr class="rule" />
+        <div class="setting">
+          <div><h3>Покраска в цвет</h3>
+            <p>${stainOn ? `Добавляется ${fmtInt(cost.stainPrice)} ${cur}/м², а время и материал идут в себестоимость` : 'Морилка перед покрытием — включите, если красите'}</p></div>
           <button type="button" class=${'chip chip--big' + (stainOn ? ' is-on' : '')} aria-pressed=${stainOn ? 'true' : 'false'}
             onClick=${() => upDraft((d) => { d.stain.on = !d.stain.on; })}>${stainOn ? 'Покраска включена' : 'Покраска'}</button>
         </div>
@@ -373,19 +373,14 @@ function Extras({ no, draft, settings, upDraft }) {
 
 // ── Клиент и сохранение ─────────────────────────────────────────
 
-function ClientSection({ no, draft, upDraft, saved, dirty, onSave, onDone }) {
+function ClientSection({ no, draft, upDraft, sub, footer }) {
   const c = draft.client;
   const set = (key) => (v) => upDraft((d) => { d.client[key] = v; });
-  const done = !!saved?.fact;
-  const status = !saved ? 'Расчёт не сохранён'
-    : dirty ? (done ? 'Заказ выполнен · есть несохранённые изменения' : 'Есть несохранённые изменения')
-    : done ? 'Заказ выполнен · учтён в статистике'
-    : `Расчёт сохранён ${fmtDateTime(saved.updatedAt)} · в статистику не входит`;
   return html`
     <section class="section">
       <header class="section__head">
         <span class="section__no">${no}</span>
-        <div class="section__title"><h2>Клиент</h2><p>Чтобы сохранить расчёт и вернуться к нему позже</p></div>
+        <div class="section__title"><h2>Клиент</h2><p>${sub}</p></div>
       </header>
       <div class="card client">
         <div class="client__grid">
@@ -397,21 +392,7 @@ function ClientSection({ no, draft, upDraft, saved, dirty, onSave, onDone }) {
             <${AutoText} cls="textarea--sm" rows="2" value=${c.note} onInput=${set('note')} placeholder="Порода дерева, сроки, пожелания, код домофона…" />
           </label>
         </div>
-        <div class="client__foot">
-          <span class=${'client__status' + (done && !dirty ? ' is-done' : '')}>${status}</span>
-          <div class="btn-row">
-            ${saved ? html`<button type="button" class="btn btn--ghost" onClick=${() => onSave(true)}>Сохранить как новый</button>` : null}
-            <button type="button" class=${'btn ' + (saved && !dirty ? 'btn--ghost' : 'btn--primary')} disabled=${!!saved && !dirty} onClick=${() => onSave(false)}>
-              ${Icon.save()}<span>${saved ? 'Сохранить изменения' : 'Сохранить расчёт'}</span>
-            </button>
-          </div>
-        </div>
-        <div class="client__done">
-          <div><h3>${done ? 'Заказ выполнен' : 'Работа сделана?'}</h3>
-            <p>${done ? 'Факт можно поправить или убрать из статистики' : 'Укажите, сколько получили и сколько времени ушло — заказ попадёт в статистику'}</p></div>
-          <button type="button" class=${'btn ' + (done ? 'btn--ghost' : 'btn--done')} onClick=${onDone}>
-            ${Icon.check()}<span>${done ? 'Факт и статистика' : 'Заказ выполнен'}</span></button>
-        </div>
+        ${footer || null}
       </div>
     </section>`;
 }
@@ -435,7 +416,7 @@ function PriceTile({ coat, price, value, onChange, settings, picked }) {
     </div>`;
 }
 
-function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) {
+function Summary({ draft, settings, totals, upDraft, onSave, notice, onNotice }) {
   const rows = [['surfaces', 'Поверхности'], ['stairs', 'Лестница']].filter(([key]) => draft.mode === key);
   const setRate = (key, coat) => (v) => upDraft((d) => { d.rates[key][coat] = v; });
   const offRange = rows.some(([key]) => !totals.sections[key].exact);
@@ -444,6 +425,9 @@ function Summary({ draft, settings, totals, upDraft, onNew, notice, onNotice }) 
     <div class="card total">
       <div class="total__head">
         <span class="eyebrow">Итог</span>
+        ${onSave ? html`
+          <button type="button" class="btn btn--primary btn--sm" disabled=${!(totals.area.total > 0)} onClick=${onSave} title="Сохранить расчёт в «Заказы»">
+            ${Icon.save()}<span>Сохранить</span></button>` : null}
       </div>
       <div class="total__area">${fmtArea(totals.area.total)}<small>м²</small></div>
 
@@ -539,12 +523,14 @@ function TemplateCard({ tpl, vars, settings, upSettings, toast, phone }) {
     </div>`;
 }
 
-// ── Страница «Расчёт» ───────────────────────────────────────────
+// ── Страница «Расчёт» и страница заказа ──────────────────────────
+// Один и тот же набор блоков: на «Расчёте» это черновик, на странице заказа — правка конкретного заказа.
 
-function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, upDraft, upSettings, withUndo, toast, onNew, saved, dirty, onSave, onDone, notice, onNotice }) {
+function CalcPage({ variant = 'scratch', draft, settings, totals, vars, cost, hideCost, onHideCost, upDraft, upSettings, withUndo, toast, onNew, onSave, notice, onNotice, head, fact }) {
   const summaryRef = useRef(null);
   const [barHidden, setBarHidden] = useState(false);
   const [polyEdit, setPolyEdit] = useState(null);
+  const order = variant === 'order';
 
   useEffect(() => {
     const el = summaryRef.current;
@@ -554,28 +540,41 @@ function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, u
     return () => io.disconnect();
   }, []);
 
-  const no = (i) => String(i + 1).padStart(2, '0');
+  const n = (i) => String(i + (fact ? 1 : 0)).padStart(2, '0');
   const editItem = polyEdit ? draft[polyEdit.kind].find((x) => x.id === polyEdit.id) : null;
   const onEditPoly = (kind, id) => setPolyEdit({ kind, id });
+  const client = html`
+    <${ClientSection} no=${order ? n(1) : '04'} draft=${draft} upDraft=${upDraft}
+      sub=${order ? 'Контакты и заметки по заказу' : 'Необязательно — можно указать позже, уже в заказе'}
+      footer=${order ? null : html`
+        <div class="client__save">
+          <p>Расчёт попадёт во вкладку «Заказы». Данные клиента можно добавить там позже.</p>
+          <button type="button" class="btn btn--primary" disabled=${!(totals.area.total > 0)} onClick=${onSave}>
+            ${Icon.save()}<span>Сохранить в заказы</span></button>
+        </div>`} />`;
 
   return html`
     <div class="layout">
       <div class="layout__main">
+        ${order ? head : null}
+        ${order ? fact : null}
+        ${order ? client : null}
         <div class="calc-top">
           <${ModeSwitch} draft=${draft} settings=${settings} upDraft=${upDraft} />
-          <button type="button" class="clear-btn" onClick=${onNew} title="Очистить всё и начать новый расчёт">
-            ${Icon.reset()}<span>Очистить всё</span>
-          </button>
+          ${!order ? html`
+            <button type="button" class="clear-btn" onClick=${onNew} title="Очистить всё и начать новый расчёт">
+              ${Icon.reset()}<span>Очистить всё</span>
+            </button>` : null}
         </div>
-        <${Section} key=${draft.mode} no="01" kind=${draft.mode} items=${draft[draft.mode]} settings=${settings}
+        <${Section} key=${draft.mode} no=${order ? n(2) : '01'} kind=${draft.mode} items=${draft[draft.mode]} settings=${settings}
           upDraft=${upDraft} withUndo=${withUndo} onEditPoly=${onEditPoly} />
-        <${Finish} no="02" draft=${draft} settings=${settings} upDraft=${upDraft} />
-        <${Extras} no="03" draft=${draft} settings=${settings} upDraft=${upDraft} />
-        <${ClientSection} no="04" draft=${draft} upDraft=${upDraft} saved=${saved} dirty=${dirty} onSave=${onSave} onDone=${onDone} />
+        <${Finish} no=${order ? n(3) : '02'} draft=${draft} settings=${settings} upDraft=${upDraft} />
+        <${Extras} no=${order ? n(4) : '03'} draft=${draft} settings=${settings} upDraft=${upDraft} />
+        ${order ? null : client}
       </div>
 
       <aside class="layout__aside" id="summary" ref=${summaryRef}>
-        <${Summary} draft=${draft} settings=${settings} totals=${totals} upDraft=${upDraft} onNew=${onNew} notice=${notice} onNotice=${onNotice} />
+        <${Summary} draft=${draft} settings=${settings} totals=${totals} upDraft=${upDraft} onSave=${order ? null : onSave} notice=${notice} onNotice=${onNotice} />
         <${NormPanel} cost=${cost} settings=${settings} hidden=${hideCost} onToggle=${onHideCost} />
         ${settings.templates.map((tpl) => html`
           <${TemplateCard} key=${tpl.id} tpl=${tpl} vars=${vars} settings=${settings} upSettings=${upSettings} toast=${toast} phone=${draft.client.phone} />`)}
@@ -587,7 +586,7 @@ function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, u
       <div class="bar__price"><span>Масло</span><b>${fmtPrice(totals.price.oil.final, settings.currency)}</b></div>
       <button type="button" class="btn btn--primary bar__btn"
         onClick=${() => summaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-        <span>Текст</span>${Icon.down()}
+        <span>Итог</span>${Icon.down()}
       </button>
     </div>
 
@@ -600,14 +599,122 @@ function CalcPage({ draft, settings, totals, vars, cost, hideCost, onHideCost, u
         }} />` : null}`;
 }
 
+/** Шапка страницы заказа: клиент, статус (расчёт / выполнен), копия и удаление. */
+function OrderHead({ order, draft, onStatus, onDuplicate, onDelete }) {
+  const c = draft.client;
+  const done = !!order.fact;
+  return html`
+    <div class="ohead">
+      <a class="ohead__back" href="#orders">${Icon.back()}<span>Заказы</span></a>
+      <div class="ohead__row">
+        <div class="ohead__title">
+          <h1>${c.name || c.address || 'Заказ без имени'}</h1>
+          <p>${c.name && c.address ? c.address + ' · ' : ''}Правки сохраняются сами · ${fmtDateTime(order.updatedAt)}</p>
+        </div>
+        <div class="item__tools">
+          <button type="button" class="icon-btn" title="Создать копию" aria-label="Создать копию" onClick=${onDuplicate}>${Icon.dup()}</button>
+          <button type="button" class="icon-btn" title="Удалить заказ" aria-label="Удалить заказ" onClick=${onDelete}>${Icon.trash()}</button>
+        </div>
+      </div>
+      <div class="status">
+        <div class="seg seg--status" role="radiogroup" aria-label="Статус заказа">
+          <button type="button" role="radio" aria-checked=${!done ? 'true' : 'false'} class=${'seg__btn' + (!done ? ' is-on' : '')} onClick=${() => onStatus(false)}>Расчёт</button>
+          <button type="button" role="radio" aria-checked=${done ? 'true' : 'false'} class=${'seg__btn' + (done ? ' is-on is-done' : '')} onClick=${() => onStatus(true)}>Выполнен</button>
+        </div>
+        <p class="status__hint">${done
+          ? 'Заказ выполнен и учтён в статистике. Укажите факт ниже.'
+          : 'Сейчас это расчёт — в статистику не входит. Когда работа сделана, переключите на «Выполнен».'}</p>
+      </div>
+    </div>`;
+}
+
+function OrderPage({ order, settings, upSettings, getOrder, putOrder, toast, hideCost, onHideCost, onDuplicate, onDelete }) {
+  const draft = useMemo(() => normalizeDraft(order.draft, settings), [order.draft, settings]);
+  const totals = useMemo(() => calcTotals(draft, settings), [draft, settings]);
+  const vars = useMemo(() => templateVars(totals, settings), [totals, settings]);
+  const cost = useMemo(() => calcCost(draft, settings, totals), [draft, settings, totals]);
+
+  // Каждая правка сразу записывается в заказ; цены в карточке заказа пересчитываются.
+  const write = (cur, d) => {
+    const nd = normalizeDraft(d, settings);
+    const t = calcTotals(nd, settings);
+    putOrder({ ...cur, draft: nd, totals: { area: t.area.total, lacquer: t.price.lacquer.final, oil: t.price.oil.final }, updatedAt: Date.now() });
+  };
+  const upDraft = (fn) => {
+    const cur = getOrder();
+    const d = structuredClone(normalizeDraft(cur.draft, settings));
+    fn(d);
+    write(cur, d);
+  };
+  const withUndo = (msg) => { const prev = structuredClone(getOrder().draft); toast(msg, () => write(getOrder(), prev)); };
+  const onFact = (fact) => putOrder({ ...getOrder(), fact, updatedAt: Date.now() });
+  const setStatus = (done) => {
+    const cur = getOrder();
+    if (done && !cur.fact) putOrder({ ...cur, fact: startFact(cur, settings), updatedAt: Date.now() });
+    if (!done && cur.fact) {
+      const prev = cur.fact;
+      putOrder({ ...cur, fact: null, updatedAt: Date.now() });
+      toast('Заказ убран из статистики', () => putOrder({ ...getOrder(), fact: prev, updatedAt: Date.now() }));
+    }
+  };
+
+  // Цену называли клиенту раньше; если по прайсу она теперь другая — спрашиваем, какую оставить.
+  const q = order.totals;
+  const notice = q && (q.lacquer !== totals.price.lacquer.final || q.oil !== totals.price.oil.final) ? { lacquer: q.lacquer, oil: q.oil } : null;
+  const onNotice = (keep) => {
+    if (keep && notice) upDraft((d) => { d.manual = { lacquer: String(notice.lacquer), oil: String(notice.oil) }; });
+    else write(getOrder(), draft);
+  };
+
+  return html`
+    <${CalcPage} variant="order" draft=${draft} settings=${settings} totals=${totals} vars=${vars} cost=${cost}
+      hideCost=${hideCost} onHideCost=${onHideCost} upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast}
+      notice=${notice} onNotice=${onNotice}
+      head=${html`<${OrderHead} order=${order} draft=${draft} onStatus=${setStatus}
+        onDuplicate=${() => onDuplicate(order)} onDelete=${() => onDelete(order)} />`}
+      fact=${order.fact ? html`<${FactSection} no="01" order=${order} settings=${settings} onFact=${onFact} />` : null} />`;
+}
+
 // ── Страница «Заказы» ───────────────────────────────────────────
 
-function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate, onFact }) {
+function RecentCard({ entry, settings, orderExists, onOpen, onSave, onDelete }) {
+  const d = entry.draft;
+  const mode = d.mode === 'stairs' ? 'stairs' : 'surfaces';
+  const items = d[mode] || [];
+  const first = items.find((it) => it.name)?.name;
+  const c = d.client || {};
+  const title = c.name || first || `${KINDS[mode].title} · ${fmtArea(entry.totals?.area)} м²`;
+  const linked = !!entry.orderId && orderExists;
+  const count = items.length;
+  return html`
+    <article class=${'card order order--recent' + (linked ? ' is-linked' : '')}>
+      <button type="button" class="order__main" onClick=${() => onOpen(entry)}>
+        <div class="order__title">
+          <h3>${title}</h3>
+          ${linked ? html`<span class="order__badge order__badge--done">в заказах</span>` : null}
+        </div>
+        <p class="order__addr">${KINDS[mode].title} · ${count} ${plural(count, ['позиция', 'позиции', 'позиций'])}${d.stain?.on ? ' · покраска' : ''}</p>
+        <p class="order__meta">${fmtDateTime(entry.updatedAt)} · ${fmtArea(entry.totals?.area)} м²</p>
+      </button>
+      <div class="order__prices">
+        <div><span>Лак</span><b>${fmtPrice(entry.totals?.lacquer, settings.currency)}</b></div>
+        <div><span>Масло</span><b>${fmtPrice(entry.totals?.oil, settings.currency)}</b></div>
+      </div>
+      <div class="order__actions">
+        <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(entry)}>${linked ? 'Открыть заказ' : 'Открыть расчёт'}</button>
+        ${!linked ? html`<button type="button" class="btn btn--ghost btn--sm" onClick=${() => onSave(entry)}>${Icon.save()}<span>В заказы</span></button>` : null}
+        <span class="order__spacer"></span>
+        <button type="button" class="icon-btn" title="Убрать из последних" aria-label="Убрать из последних" onClick=${() => onDelete(entry)}>${Icon.x()}</button>
+      </div>
+    </article>`;
+}
+
+function OrdersPage({ orders, recent, settings, view, setView, onOpen, onDelete, onDuplicate, onOpenRecent, onSaveRecent, onDeleteRecent }) {
   const [q, setQ] = useState('');
   const live = orders.filter((o) => !o.deleted);
   const doneCount = live.filter((o) => o.fact).length;
   const quoteCount = live.length - doneCount;
-  const [view, setView] = useState(() => (quoteCount === 0 && doneCount > 0 ? 'done' : 'quotes'));
+  const liveIds = new Set(live.map((o) => o.id));
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return live
@@ -619,24 +726,27 @@ function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate
       })
       .sort((a, b) => (view === 'done' ? String(b.fact.date || '').localeCompare(String(a.fact.date || '')) : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
   }, [orders, q, view]);
-  const inView = view === 'done' ? doneCount : quoteCount;
+  const inView = view === 'done' ? doneCount : view === 'recent' ? recent.length : quoteCount;
+  const TITLE = {
+    quotes: 'Сохранённые расчёты и заказы в работе. В статистику входят, когда у заказа статус «Выполнен»',
+    done: 'Выполненные заказы — из них считается статистика',
+    recent: 'Временная история: хранятся последние 10 расчётов. Чтобы расчёт не пропал — сохраните его в заказы',
+  };
 
   return html`
     <div class="page">
       <section class="section">
         <header class="section__head">
-          <div class="section__title"><h2>Заказы</h2>
-            <p>${view === 'done' ? 'Выполненные заказы — из них считается статистика' : 'Сохранённые расчёты. В статистику не входят, пока заказ не отмечен выполненным'}</p></div>
+          <div class="section__title"><h2>Заказы</h2><p>${TITLE[view]}</p></div>
         </header>
 
         <div class="seg seg--tabs" role="tablist">
-          <button type="button" role="tab" aria-selected=${view === 'quotes' ? 'true' : 'false'} class=${'seg__btn' + (view === 'quotes' ? ' is-on' : '')} onClick=${() => setView('quotes')}>
-            Расчёты<sup>${quoteCount}</sup></button>
-          <button type="button" role="tab" aria-selected=${view === 'done' ? 'true' : 'false'} class=${'seg__btn' + (view === 'done' ? ' is-on' : '')} onClick=${() => setView('done')}>
-            Выполненные<sup>${doneCount}</sup></button>
+          ${[['quotes', 'Расчёты', quoteCount], ['done', 'Выполненные', doneCount], ['recent', 'Последние', recent.length]].map(([v, l, cnt]) => html`
+            <button type="button" role="tab" key=${v} aria-selected=${view === v ? 'true' : 'false'} class=${'seg__btn' + (view === v ? ' is-on' : '')} onClick=${() => setView(v)}>
+              ${l}<sup>${cnt}</sup></button>`)}
         </div>
 
-        ${inView > 3 ? html`
+        ${view !== 'recent' && inView > 3 ? html`
           <label class="field search">
             <span class="field__box">${Icon.search()}<input type="search" value=${q} placeholder="Имя, телефон или адрес"
               aria-label="Поиск по заказам" onInput=${(e) => setQ(e.target.value)} /></span>
@@ -644,14 +754,22 @@ function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate
 
         ${!inView ? html`
           <div class="card empty">
-            <h3>${view === 'done' ? 'Выполненных заказов пока нет' : 'Сохранённых расчётов пока нет'}</h3>
+            <h3>${view === 'done' ? 'Выполненных заказов пока нет' : view === 'recent' ? 'Последних расчётов пока нет' : 'Сохранённых расчётов пока нет'}</h3>
             <p>${view === 'done'
-              ? 'Откройте сохранённый расчёт и нажмите «Заказ выполнен» — он перейдёт сюда и попадёт в статистику.'
-              : 'На вкладке «Расчёт» заполните блок «Клиент» и нажмите «Сохранить расчёт» — он появится здесь со всеми размерами и ценами.'}</p>
+              ? 'Откройте заказ и переключите статус на «Выполнен» — он перейдёт сюда и попадёт в статистику.'
+              : view === 'recent'
+                ? 'Каждый расчёт с указанной площадью запоминается сам — здесь будут последние десять.'
+                : 'На вкладке «Расчёт» посчитайте работу и нажмите «Сохранить» — расчёт появится здесь. Клиента можно указать позже.'}</p>
             <a class="btn btn--primary" href="#calc">К расчёту</a>
           </div>` : null}
-        ${inView && !list.length ? html`<p class="lead">Ничего не найдено.</p>` : null}
+        ${inView && view !== 'recent' && !list.length ? html`<p class="lead">Ничего не найдено.</p>` : null}
 
+        ${view === 'recent' ? html`
+          <div class="orders">
+            ${recent.map((e) => html`
+              <${RecentCard} key=${e.rid} entry=${e} settings=${settings} orderExists=${liveIds.has(e.orderId)}
+                onOpen=${onOpenRecent} onSave=${onSaveRecent} onDelete=${onDeleteRecent} />`)}
+          </div>` : html`
         <div class="orders">
           ${list.map((o) => {
             const c = o.draft?.client || {};
@@ -660,16 +778,15 @@ function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate
             const mode = o.draft?.mode || (o.draft?.show?.stairs && !o.draft?.show?.surfaces ? 'stairs' : 'surfaces');
             const count = o.draft?.[mode]?.length || 0;
             return html`
-              <article class=${'card order' + (o.id === currentId ? ' is-current' : '') + (fs ? ' is-done' : '')} key=${o.id}>
+              <article class=${'card order' + (fs ? ' is-done' : '')} key=${o.id}>
                 <button type="button" class="order__main" onClick=${() => onOpen(o)}>
                   <div class="order__title">
                     <h3>${c.name || c.address || 'Без имени'}</h3>
-                    ${o.id === currentId ? html`<span class="order__badge">открыт</span>` : null}
                   </div>
                   ${c.name && c.address ? html`<p class="order__addr">${c.address}</p>` : null}
                   ${c.note ? html`<p class="order__note">${c.note}</p>` : null}
                   <p class="order__meta">${fs
-                    ? `Выполнен ${fmtDate(new Date(o.fact.date || o.updatedAt).getTime())} · ${fmtArea(fs.area)} м² · ${fmtNum(fs.hours, 1)} ч${fs.byStages ? '' : ' (общее время)'}`
+                    ? `Выполнен ${fmtDate(new Date(o.fact.date || o.updatedAt).getTime())} · ${fmtArea(fs.area)} м² · ${fmtNum(fs.hours, 1)} ч`
                     : `${fmtDate(o.updatedAt)} · ${fmtArea(o.totals?.area)} м² · ${count} ${plural(count, ['позиция', 'позиции', 'позиций'])}${o.draft?.night?.on ? ' · ночная' : ''}`}</p>
                 </button>
                 ${fs ? html`
@@ -683,18 +800,17 @@ function OrdersPage({ orders, settings, currentId, onOpen, onDelete, onDuplicate
                     <div><span>Масло</span><b>${fmtPrice(o.totals?.oil, settings.currency)}</b></div>
                   </div>`}
                 <div class="order__actions">
-                  <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(o)}>Открыть расчёт</button>
-                  <button type="button" class=${'btn btn--sm btn--fact ' + (fs ? 'btn--ghost' : 'btn--done')} onClick=${() => onFact(o)}>${Icon.check()}<span>${fs ? 'Факт' : 'Заказ выполнен'}</span></button>
+                  <button type="button" class="btn btn--primary btn--sm" onClick=${() => onOpen(o)}>Открыть</button>
                   ${tel ? html`<a class="btn btn--ghost btn--sm" href=${'tel:+' + tel}>${Icon.phone()}<span>Позвонить</span></a>` : null}
                   ${c.address ? html`<a class="btn btn--ghost btn--sm" target="_blank" rel="noopener"
                     href=${'https://yandex.ru/maps/?text=' + encodeURIComponent(c.address)}>${Icon.pin()}<span>Карта</span></a>` : null}
                   <span class="order__spacer"></span>
-                  <button type="button" class="icon-btn" title="Создать копию расчёта" aria-label="Создать копию" onClick=${() => onDuplicate(o)}>${Icon.dup()}</button>
+                  <button type="button" class="icon-btn" title="Создать копию" aria-label="Создать копию" onClick=${() => onDuplicate(o)}>${Icon.dup()}</button>
                   <button type="button" class="icon-btn" title="Удалить" aria-label="Удалить заказ" onClick=${() => onDelete(o)}>${Icon.trash()}</button>
                 </div>
               </article>`;
           })}
-        </div>
+        </div>`}
       </section>
     </div>`;
 }
@@ -982,31 +1098,42 @@ const TABS = [['calc', 'Расчёт'], ['orders', 'Заказы'], ['stats', '�
 const ROUTES = ['calc', 'orders', 'stats', 'prices', 'cost', 'texts'];
 const THEMES = ['auto', 'light', 'dark'];
 const THEME_LABEL = { auto: 'Тема: как в системе', light: 'Тема: светлая', dark: 'Тема: тёмная' };
-const tabFromHash = () => (ROUTES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'calc');
-const topTab = (tab) => (['cost', 'texts'].includes(tab) ? 'prices' : tab);
+const parseHash = () => {
+  const h = location.hash.slice(1);
+  const m = h.match(/^order\/(.+)$/);
+  if (m) return { tab: 'order', id: decodeURIComponent(m[1]) };
+  return { tab: ROUTES.includes(h) ? h : 'calc', id: null };
+};
+const topTab = (tab) => (['cost', 'texts'].includes(tab) ? 'prices' : tab === 'order' ? 'orders' : tab);
+const orderTotals = (t) => ({ area: t.area.total, lacquer: t.price.lacquer.final, oil: t.price.oil.final });
 
 function App() {
   const [settings, setSettings] = useState(loadSettings);
   const [draft, setDraft] = useState(() => loadDraft(settings));
   const [orders, setOrders] = useState(loadOrders);
-  const [tab, setTab] = useState(tabFromHash);
+  const [recent, setRecent] = useState(loadRecent);
+  const [route, setRoute] = useState(parseHash);
+  const [ordersView, setOrdersView] = useState('quotes');
   const [theme, setTheme] = useState(loadTheme);
   const [cloud, setCloud] = useState({ status: cloudConfigured ? 'init' : 'off', user: null });
   const [toastState, setToastState] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const [factOrder, setFactOrder] = useState(null);
   const [hideCost, setHideCost] = useState(() => { try { return localStorage.getItem('rc.hideCost') === '1'; } catch { return false; } });
   const onHideCost = () => setHideCost((v) => { try { localStorage.setItem('rc.hideCost', v ? '0' : '1'); } catch { /* noop */ } return !v; });
   const settingsRef = useRef(settings);
   const ordersRef = useRef(orders);
+  const recentRef = useRef(recent);
   const remoteAt = useRef(null);
   const toastTimer = useRef(null);
+  const pushTimers = useRef({});
   settingsRef.current = settings;
   ordersRef.current = orders;
+  recentRef.current = recent;
+  const tab = route.tab;
 
   const upDraft = (fn) => setDraft((d) => { const n = structuredClone(d); fn(n); return n; });
   const upSettings = (fn) => setSettings((s) => { const n = structuredClone(s); fn(n); n.updatedAt = Date.now(); return n; });
   const replaceSettings = (s) => setSettings({ ...s, updatedAt: Date.now() });
+  const go = (hash) => { location.hash = hash; };
 
   const toast = (msg, action) => {
     clearTimeout(toastTimer.current);
@@ -1015,67 +1142,95 @@ function App() {
   };
   const withUndo = (msg) => { const prev = draft; toast(msg, () => setDraft(prev)); };
   const withUndoSettings = (msg) => { const prev = settings; toast(msg, () => replaceSettings(prev)); };
-  const onNew = () => {
-    withUndo('Расчёт очищен');
-    setNotice(null);
-    setDraft(defaultDraft(settings));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
 
   const totals = useMemo(() => calcTotals(draft, settings), [draft, settings]);
   const vars = useMemo(() => templateVars(totals, settings), [totals, settings]);
   const cost = useMemo(() => calcCost(draft, settings, totals), [draft, settings, totals]);
+  const live = useRef({ draft, totals });
+  live.current = { draft, totals };
+
+  // ── Последние 10 расчётов: запоминаются сами, пока что-то посчитано ──
+  const commitRecent = (extra = {}) => {
+    const { draft: d, totals: t } = live.current;
+    if (!(t.area.total > 0)) return;
+    const prev = recentRef.current.find((e) => e.rid === d.rid);
+    if (prev && !extra.orderId && JSON.stringify(prev.draft) === JSON.stringify(d)) return;
+    const entry = { rid: d.rid, updatedAt: Date.now(), draft: structuredClone(d), totals: orderTotals(t), orderId: extra.orderId || prev?.orderId };
+    const next = upsertRecent(recentRef.current, entry);
+    recentRef.current = next;
+    setRecent(next);
+  };
+  useEffect(() => {
+    const t = setTimeout(() => commitRecent(), 1200);
+    return () => clearTimeout(t);
+  }, [draft]);
+  useEffect(() => {
+    const flush = () => { if (document.visibilityState !== 'visible') commitRecent(); };
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('pagehide', () => commitRecent());
+    return () => document.removeEventListener('visibilitychange', flush);
+  }, []);
+  useEffect(() => { saveRecent(recent); }, [recent]);
+
+  const onNew = () => {
+    commitRecent();
+    withUndo('Расчёт очищен');
+    setDraft(defaultDraft(settings));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // ── Заказы ──
-  // Заказы записываются в память браузера сразу, не дожидаясь перерисовки.
+  // Запись в браузер сразу; в облако — с небольшой задержкой, чтобы не слать каждую букву.
   const putOrder = (order) => {
     const list = ordersRef.current;
     const next = list.some((o) => o.id === order.id) ? list.map((o) => (o.id === order.id ? order : o)) : [order, ...list];
     ordersRef.current = next;
     saveOrders(next);
     setOrders(next);
-    pushOrder(order).catch(() => {});
+    clearTimeout(pushTimers.current[order.id]);
+    pushTimers.current[order.id] = setTimeout(() => {
+      pushOrder(ordersRef.current.find((o) => o.id === order.id) || order).catch(() => {});
+    }, 700);
   };
-  const saved = draft.id ? orders.find((o) => o.id === draft.id && !o.deleted) : null;
-  const dirty = useMemo(() => !saved || JSON.stringify(saved.draft) !== JSON.stringify(draft), [saved, draft]);
+  const getOrder = (id) => ordersRef.current.find((o) => o.id === id && !o.deleted);
 
-  // Сохраняет расчёт. Факт выполнения (статистика) при обычном сохранении не теряется, при «как новый» — не копируется.
-  const persist = (asNew) => {
-    const now = Date.now();
-    const fresh = asNew || !saved;
-    const id = fresh ? uid() + uid() : saved.id;
-    const d = { ...structuredClone(draft), id };
-    const order = {
-      id, createdAt: fresh ? now : saved.createdAt, updatedAt: now, deleted: false, draft: d,
-      totals: { area: totals.area.total, lacquer: totals.price.lacquer.final, oil: totals.price.oil.final },
-      fact: fresh ? null : (saved.fact || null),
-    };
+  /** Создаёт заказ из расчёта. Клиент не обязателен — его можно указать позже на странице заказа. */
+  const createOrder = (d, t) => {
+    const now = Date.now(), id = uid() + uid();
+    const order = { id, createdAt: now, updatedAt: now, deleted: false, draft: { ...structuredClone(d), id }, totals: orderTotals(t), fact: null };
     putOrder(order);
-    setDraft(d);
-    setNotice(null);
     return order;
   };
-  const onSave = (asNew) => {
-    persist(asNew);
-    toast(asNew ? 'Сохранено как новый расчёт' : 'Расчёт сохранён');
+  const onSave = () => {
+    const order = createOrder(draft, totals);
+    commitRecent({ orderId: order.id });
+    setDraft(defaultDraft(settings));
+    toast('Расчёт сохранён в «Заказы»');
+    go('#order/' + order.id);
   };
-  const onDone = () => setFactOrder(saved && !dirty ? saved : persist(false));
-  const onOpen = (order) => {
-    const d = normalizeDraft(order.draft, settings);
-    d.id = order.id;
-    const t = calcTotals(d, settings);
-    const was = order.totals || {};
-    setNotice(t.price.lacquer.final !== was.lacquer || t.price.oil.final !== was.oil ? { lacquer: was.lacquer, oil: was.oil } : null);
-    setDraft(d);
-    location.hash = '#calc';
-    window.scrollTo(0, 0);
+  const onOpenRecent = (entry) => {
+    if (entry.orderId && getOrder(entry.orderId)) { go('#order/' + entry.orderId); return; }
+    commitRecent();
+    setDraft(normalizeDraft(entry.draft, settings));
+    go('#calc');
   };
-  const onNotice = (keep) => {
-    if (keep && notice) upDraft((d) => { d.manual = { lacquer: String(notice.lacquer), oil: String(notice.oil) }; });
-    setNotice(null);
+  const onSaveRecent = (entry) => {
+    const t = calcTotals(normalizeDraft(entry.draft, settings), settings);
+    const order = createOrder(normalizeDraft(entry.draft, settings), t);
+    const next = upsertRecent(recentRef.current, { ...entry, orderId: order.id });
+    recentRef.current = next;
+    setRecent(next);
+    toast('Расчёт сохранён в «Заказы»');
+  };
+  const onDeleteRecent = (entry) => {
+    const next = recentRef.current.filter((e) => e.rid !== entry.rid);
+    recentRef.current = next;
+    setRecent(next);
+    toast('Убрано из последних', () => { const n2 = upsertRecent(recentRef.current, entry); recentRef.current = n2; setRecent(n2); });
   };
   const onDeleteOrder = (order) => {
     putOrder({ ...order, deleted: true, updatedAt: Date.now() });
+    if (tab === 'order') go('#orders');
     toast('Заказ удалён', () => putOrder({ ...order, deleted: false, updatedAt: Date.now() }));
   };
   const onDuplicateOrder = (order) => {
@@ -1085,17 +1240,7 @@ function App() {
     d.client = { ...d.client, name: d.client?.name ? d.client.name + ' (копия)' : '' };
     putOrder({ ...structuredClone(order), id, createdAt: now, updatedAt: now, draft: d, fact: null });
     toast('Создана копия расчёта');
-  };
-  const onFactSave = (fact) => {
-    putOrder({ ...factOrder, fact, updatedAt: Date.now() });
-    setFactOrder(null);
-    toast('Заказ выполнен и учтён в статистике');
-  };
-  const onFactReopen = () => {
-    const { fact, ...rest } = factOrder;
-    putOrder({ ...rest, fact: null, updatedAt: Date.now() });
-    setFactOrder(null);
-    toast('Заказ убран из статистики и вернулся в расчёты');
+    if (tab === 'order') go('#order/' + id);
   };
   const onImport = (data) => {
     const { orders: imported, ...rest } = data;
@@ -1153,7 +1298,7 @@ function App() {
 
   // ── Навигация и тема ──
   useEffect(() => {
-    const onHash = () => { setTab(tabFromHash()); window.scrollTo(0, 0); };
+    const onHash = () => { setRoute(parseHash()); window.scrollTo(0, 0); };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
@@ -1165,6 +1310,7 @@ function App() {
 
   const ThemeIcon = theme === 'auto' ? Icon.auto : theme === 'light' ? Icon.sun : Icon.moon;
   const orderCount = orders.filter((o) => !o.deleted).length;
+  const openOrder = tab === 'order' ? getOrder(route.id) : null;
 
   return html`
     <header class="top">
@@ -1194,11 +1340,20 @@ function App() {
     <main class="wrap">
       ${tab === 'calc' ? html`
         <${CalcPage} draft=${draft} settings=${settings} totals=${totals} vars=${vars} cost=${cost} hideCost=${hideCost} onHideCost=${onHideCost}
-          upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast} onNew=${onNew}
-          saved=${saved} dirty=${dirty} onSave=${onSave} onDone=${onDone} notice=${notice} onNotice=${onNotice} />` : null}
+          upDraft=${upDraft} upSettings=${upSettings} withUndo=${withUndo} toast=${toast} onNew=${onNew} onSave=${onSave} />` : null}
+      ${tab === 'order' && openOrder ? html`
+        <${OrderPage} key=${openOrder.id} order=${openOrder} settings=${settings} upSettings=${upSettings}
+          getOrder=${() => getOrder(openOrder.id)} putOrder=${putOrder} toast=${toast} hideCost=${hideCost} onHideCost=${onHideCost}
+          onDuplicate=${onDuplicateOrder} onDelete=${onDeleteOrder} />` : null}
+      ${tab === 'order' && !openOrder ? html`
+        <div class="page"><div class="card empty">
+          <h3>Заказ не найден</h3><p>Возможно, он был удалён.</p>
+          <a class="btn btn--primary" href="#orders">К заказам</a>
+        </div></div>` : null}
       ${tab === 'orders' ? html`
-        <${OrdersPage} orders=${orders} settings=${settings} currentId=${draft.id}
-          onOpen=${onOpen} onDelete=${onDeleteOrder} onDuplicate=${onDuplicateOrder} onFact=${setFactOrder} />` : null}
+        <${OrdersPage} orders=${orders} recent=${recent} settings=${settings} view=${ordersView} setView=${setOrdersView}
+          onOpen=${(o) => go('#order/' + o.id)} onDelete=${onDeleteOrder} onDuplicate=${onDuplicateOrder}
+          onOpenRecent=${onOpenRecent} onSaveRecent=${onSaveRecent} onDeleteRecent=${onDeleteRecent} />` : null}
       ${tab === 'stats' ? html`<${StatsPage} orders=${orders} settings=${settings} />` : null}
       ${topTab(tab) === 'prices' ? html`<${SettingsNav} tab=${tab} />` : null}
       ${tab === 'cost' ? html`<div class="page"><${CostPage} settings=${settings} upSettings=${upSettings} /></div>` : null}
@@ -1207,9 +1362,6 @@ function App() {
       ${tab === 'texts' ? html`
         <${TextsPage} settings=${settings} vars=${vars} upSettings=${upSettings} withUndoSettings=${withUndoSettings} />` : null}
     </main>
-
-    ${factOrder ? html`
-      <${FactModal} order=${factOrder} settings=${settings} onSave=${onFactSave} onReopen=${onFactReopen} onClose=${() => setFactOrder(null)} />` : null}
 
     <div class=${'toast' + (toastState ? ' is-on' : '')} role="status" aria-live="polite">
       ${toastState ? html`

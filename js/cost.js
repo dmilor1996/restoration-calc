@@ -1,11 +1,11 @@
 // Нормочас и себестоимость: блок в итоге, настройки, факт выполнения, статистика.
 
-import { html, useState, useEffect, useMemo } from './vendor/preact-htm.js';
+import { html, useState, useMemo } from './vendor/preact-htm.js';
 import {
   num, materialCostPerM2, materialMlPerM2, materialsOfKind, travelPlan, calcTotals, calcCost,
   factSummary, aggregateStats, normKey, fmtInt, fmtNum, fmtArea, fmtPrice, plural,
 } from './calc.js';
-import { uid } from './defaults.js';
+import { uid, normalizeDraft } from './defaults.js';
 import { Icon, Num, Text } from './ui.js';
 
 const COAT = { lacquer: 'Лак', oil: 'Масло' };
@@ -200,7 +200,7 @@ const r1 = (v) => String(Math.round(v * 10) / 10);
 
 /** Заготовка факта из плана: то, что посчитал калькулятор. Правится под реальные цифры. */
 function planFact(order, settings, coat) {
-  const d = { ...order.draft, coat };
+  const d = { ...normalizeDraft(order.draft, settings), coat };
   const totals = calcTotals(d, settings);
   const cost = calcCost(d, settings, totals);
   const x = cost.coats[coat];
@@ -213,117 +213,117 @@ function planFact(order, settings, coat) {
     hours: {
       sand: r1(x.hours.sand), coat: r1(x.hours.coat + x.hours.fixed), stain: x.hours.stain ? r1(x.hours.stain) : '',
       services: Object.fromEntries(cost.services.map((s) => [s.id, String(num(s.hours))])),
-      travel: x.hours.travel ? r1(x.hours.travel) : '', other: '', total: r1(x.hours.total),
+      travel: x.hours.travel ? r1(x.hours.travel) : '', other: '',
+      total: r1(x.hours.total - x.hours.travel),     // «только общее» — время работы без дороги
     },
     materials: Object.fromEntries(x.mats.map(({ m }) => [m.id, String(Math.round(materialMlPerM2(m) * area))])),
     expenses: '',
   };
 }
 
-export function FactModal({ order, settings, onSave, onClose, onReopen }) {
+/** Достраивает производные поля факта: стоимость материалов и расход на машину. */
+export function finalizeFact(f, order, settings) {
+  const tp = travelPlan(normalizeDraft(order.draft, settings), settings.cost);
+  const materialsCost = settings.cost.materials.reduce((s, m) => {
+    const ml = num(m.volume) * 1000;
+    return s + (ml > 0 ? (num(m.price) / ml) * num(f.materials?.[m.id]) : 0);
+  }, 0);
+  return { ...f, materialsCost: Math.round(materialsCost), carCost: Math.round(tp.carCost) };
+}
+
+/** Факт для заказа, который только что отмечен выполненным. */
+export function startFact(order, settings) {
+  const d = normalizeDraft(order.draft, settings);
+  return finalizeFact(planFact(order, settings, d.coat === 'lacquer' ? 'lacquer' : 'oil'), order, settings);
+}
+
+/** Блок «Выполнение» на странице заказа. Правки сохраняются сразу, отдельной кнопки нет. */
+export function FactSection({ no, order, settings, onFact }) {
+  const f = order.fact;
   const cur = settings.currency;
-  const [f, setF] = useState(() => (order.fact ? structuredClone(order.fact) : planFact(order, settings, order.draft?.coat === 'lacquer' ? 'lacquer' : 'oil')));
-  const set = (fn) => setF((prev) => { const n = structuredClone(prev); fn(n); return n; });
-  const c = order.draft?.client || {};
+  const set = (fn) => { const n = structuredClone(f); fn(n); onFact(finalizeFact(n, order, settings)); };
   const total = f.hoursMode === 'total';
   const mats = settings.cost.materials.filter((m) => m.id in (f.materials || {}));
   const moreMats = settings.cost.materials.filter((m) => !(m.id in (f.materials || {})));
   const services = settings.services.filter((s) => s.id in (f.hours.services || {}));
   const moreServices = settings.services.filter((s) => !(s.id in (f.hours.services || {})));
-  const tp = travelPlan(order.draft, settings.cost);
-
-  useEffect(() => {
-    document.documentElement.classList.add('is-locked');
-    return () => document.documentElement.classList.remove('is-locked');
-  }, []);
-
-  const materialsCost = settings.cost.materials.reduce((s, m) => {
-    const ml = num(m.volume) * 1000;
-    return s + (ml > 0 ? (num(m.price) / ml) * num(f.materials?.[m.id]) : 0);
-  }, 0);
-  const full = { ...f, materialsCost: Math.round(materialsCost), carCost: Math.round(tp.carCost) };
-  const sum = factSummary({ fact: full });
-  const setCoat = (coat) => { if (order.fact) set((n) => { n.coat = coat; }); else setF(planFact(order, settings, coat)); };
+  const sum = factSummary({ fact: f });
   const noTime = !(sum.hours > 0);
 
   return html`
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Заказ выполнен">
-      <div class="modal__box modal__box--narrow">
-        <header class="modal__head">
-          <div><span class="eyebrow">Заказ выполнен — идёт в статистику</span><h2>${c.name || c.address || 'Без имени'}</h2></div>
-          <button type="button" class="icon-btn" aria-label="Закрыть" onClick=${onClose}>${Icon.x()}</button>
-        </header>
-        <div class="modal__body fact">
-          <p class="card__note">Поля заполнены по плану — поправьте на то, как было на самом деле.</p>
-          <div class="fact__row">
-            <div class="seg">
-              ${['oil', 'lacquer'].map((v) => html`
-                <button type="button" class=${'seg__btn' + (f.coat === v ? ' is-on' : '')} onClick=${() => setCoat(v)}>Покрыл: ${COAT[v].toLowerCase()}</button>`)}
-            </div>
-            <div class="seg">
-              ${['oil', 'lacquer'].map((v) => html`
-                <button type="button" class=${'seg__btn' + (f.old === v ? ' is-on' : '')} onClick=${() => set((n) => { n.old = v; })}>Было: ${COAT[v].toLowerCase()}</button>`)}
-            </div>
-            <label class="field"><span class="field__box"><input type="date" value=${f.date} aria-label="Дата выполнения"
-              onInput=${(e) => set((n) => { n.date = e.target.value; })} /></span></label>
+    <section class="section">
+      <header class="section__head">
+        <span class="section__no">${no}</span>
+        <div class="section__title"><h2>Выполнение</h2><p>Как было на самом деле — это идёт в статистику. Сохраняется само</p></div>
+      </header>
+      <div class="card fact">
+        <div class="fact__row">
+          <div class="seg">
+            ${['oil', 'lacquer'].map((v) => html`
+              <button type="button" class=${'seg__btn' + (f.coat === v ? ' is-on' : '')} onClick=${() => set((n) => { n.coat = v; })}>Покрыл: ${COAT[v].toLowerCase()}</button>`)}
           </div>
-          <div class="fields">
-            <${Num} group label="Получено от клиента" suffix=${cur} value=${f.received} onChange=${(v) => set((n) => { n.received = v; })} />
-            <${Num} decimal label="Площадь" suffix="м²" value=${f.area} onChange=${(v) => set((n) => { n.area = v; })} />
+          <div class="seg">
+            ${['oil', 'lacquer'].map((v) => html`
+              <button type="button" class=${'seg__btn' + (f.old === v ? ' is-on' : '')} onClick=${() => set((n) => { n.old = v; })}>Было: ${COAT[v].toLowerCase()}</button>`)}
           </div>
-
-          <div class="fact__head">
-            <span class="eyebrow">Время</span>
-            <div class="seg">
-              <button type="button" class=${'seg__btn' + (!total ? ' is-on' : '')} onClick=${() => set((n) => { n.hoursMode = 'stages'; })}>По этапам</button>
-              <button type="button" class=${'seg__btn' + (total ? ' is-on' : '')} onClick=${() => set((n) => { n.hoursMode = 'total'; })}>Только общее</button>
-            </div>
-          </div>
-          ${total ? html`
-            <div class="fields">
-              <${Num} decimal label="Всего часов на заказ" suffix="ч" value=${f.hours.total} onChange=${(v) => set((n) => { n.hours.total = v; })} />
-            </div>
-            <p class="card__note">Не помните по этапам — укажите общее время, включая дорогу. В статистику пойдёт ваш час и прибыль; нормы шлифовки и покрытия по этому заказу не обновятся.</p>` : html`
-            <div class="fields">
-              <${Num} decimal label="Шлифовка" suffix="ч" value=${f.hours.sand} onChange=${(v) => set((n) => { n.hours.sand = v; })} />
-              <${Num} decimal label="Покрытие" suffix="ч" value=${f.hours.coat} onChange=${(v) => set((n) => { n.hours.coat = v; })} />
-              ${f.stain ? html`<${Num} decimal label="Покраска" suffix="ч" value=${f.hours.stain} onChange=${(v) => set((n) => { n.hours.stain = v; })} />` : null}
-              ${services.map((s) => html`
-                <${Num} key=${s.id} decimal label=${normKey(s.key) || s.name} suffix="ч" value=${f.hours.services[s.id]}
-                  onChange=${(v) => set((n) => { n.hours.services[s.id] = v; })} />`)}
-              <${Num} decimal label="Дорога" suffix="ч" value=${f.hours.travel} onChange=${(v) => set((n) => { n.hours.travel = v; })} />
-              <${Num} decimal label="Прочее" suffix="ч" value=${f.hours.other} onChange=${(v) => set((n) => { n.hours.other = v; })} />
-            </div>
-            <div class="chips">
-              ${!f.stain ? html`<button type="button" class="chip" onClick=${() => set((n) => { n.stain = true; })}>+ покраска</button>` : null}
-              ${moreServices.map((s) => html`<button type="button" class="chip" key=${s.id} onClick=${() => set((n) => { n.hours.services[s.id] = ''; })}>+ ${normKey(s.key) || s.name}</button>`)}
-            </div>`}
-
-          <span class="eyebrow">Расход материалов</span>
-          <div class="fields">
-            ${mats.map((m) => html`
-              <${Num} key=${m.id} label=${m.name || KIND[m.kind]} suffix="мл" value=${f.materials?.[m.id] ?? ''}
-                onChange=${(v) => set((n) => { n.materials = { ...(n.materials || {}), [m.id]: v }; })} />`)}
-            <${Num} group label="Прочие расходы" suffix=${cur} value=${f.expenses} onChange=${(v) => set((n) => { n.expenses = v; })} />
-          </div>
-          ${moreMats.length ? html`
-            <div class="chips">
-              ${moreMats.map((m) => html`<button type="button" class="chip" key=${m.id} onClick=${() => set((n) => { n.materials = { ...(n.materials || {}), [m.id]: '' }; })}>+ ${m.name || KIND[m.kind]}</button>`)}
-            </div>` : null}
+          <label class="field"><span class="field__box"><input type="date" value=${f.date} aria-label="Дата выполнения"
+            onInput=${(e) => set((n) => { n.date = e.target.value; })} /></span></label>
         </div>
-        <footer class="modal__foot">
+        <div class="fields">
+          <${Num} group label="Получено от клиента" suffix=${cur} value=${f.received} onChange=${(v) => set((n) => { n.received = v; })} />
+          <${Num} decimal label="Площадь" suffix="м²" value=${f.area} onChange=${(v) => set((n) => { n.area = v; })} />
+        </div>
+
+        <div class="fact__head">
+          <span class="eyebrow">Время</span>
+          <div class="seg">
+            <button type="button" class=${'seg__btn' + (!total ? ' is-on' : '')} onClick=${() => set((n) => { n.hoursMode = 'stages'; })}>По этапам</button>
+            <button type="button" class=${'seg__btn' + (total ? ' is-on' : '')} onClick=${() => set((n) => { n.hoursMode = 'total'; })}>Только общее</button>
+          </div>
+        </div>
+        ${total ? html`
+          <div class="fields">
+            <${Num} decimal label="Время работы" suffix="ч" value=${f.hours.total} onChange=${(v) => set((n) => { n.hours.total = v; })} />
+            <${Num} decimal label="Дорога" suffix="ч" value=${f.hours.travel} onChange=${(v) => set((n) => { n.hours.travel = v; })} />
+          </div>
+          <p class="card__note">Не помните по этапам — укажите всё время работы одним числом. Дорога считается всегда. В статистику пойдёт ваш час и прибыль; нормы шлифовки и покрытия по этому заказу не обновятся.</p>` : html`
+          <div class="fields">
+            <${Num} decimal label="Шлифовка" suffix="ч" value=${f.hours.sand} onChange=${(v) => set((n) => { n.hours.sand = v; })} />
+            <${Num} decimal label="Покрытие" suffix="ч" value=${f.hours.coat} onChange=${(v) => set((n) => { n.hours.coat = v; })} />
+            ${f.stain ? html`<${Num} decimal label="Покраска" suffix="ч" value=${f.hours.stain} onChange=${(v) => set((n) => { n.hours.stain = v; })} />` : null}
+            ${services.map((s) => html`
+              <${Num} key=${s.id} decimal label=${normKey(s.key) || s.name} suffix="ч" value=${f.hours.services[s.id]}
+                onChange=${(v) => set((n) => { n.hours.services[s.id] = v; })} />`)}
+            <${Num} decimal label="Дорога" suffix="ч" value=${f.hours.travel} onChange=${(v) => set((n) => { n.hours.travel = v; })} />
+            <${Num} decimal label="Прочее" suffix="ч" value=${f.hours.other} onChange=${(v) => set((n) => { n.hours.other = v; })} />
+          </div>
+          <div class="chips">
+            ${!f.stain ? html`<button type="button" class="chip" onClick=${() => set((n) => { n.stain = true; })}>+ покраска</button>` : null}
+            ${moreServices.map((s) => html`<button type="button" class="chip" key=${s.id} onClick=${() => set((n) => { n.hours.services[s.id] = ''; })}>+ ${normKey(s.key) || s.name}</button>`)}
+          </div>`}
+
+        <span class="eyebrow">Расход материалов</span>
+        <div class="fields">
+          ${mats.map((m) => html`
+            <${Num} key=${m.id} label=${m.name || KIND[m.kind]} suffix="мл" value=${f.materials?.[m.id] ?? ''}
+              onChange=${(v) => set((n) => { n.materials = { ...(n.materials || {}), [m.id]: v }; })} />`)}
+          <${Num} group label="Прочие расходы" suffix=${cur} value=${f.expenses} onChange=${(v) => set((n) => { n.expenses = v; })} />
+        </div>
+        ${moreMats.length ? html`
+          <div class="chips">
+            ${moreMats.map((m) => html`<button type="button" class="chip" key=${m.id} onClick=${() => set((n) => { n.materials = { ...(n.materials || {}), [m.id]: '' }; })}>+ ${m.name || KIND[m.kind]}</button>`)}
+          </div>` : null}
+
+        <div class="fact__result">
           <div class="pe__stats">
             <div><span>Прибыль</span><b>${fmtInt(sum.profit)}<small>${cur}</small></b></div>
             <div><span>Ваш час</span><b>${noTime ? '—' : fmtInt(sum.rate)}<small>${cur}/ч</small></b></div>
             <div><span>За м²</span><b>${fmtInt(sum.perM2)}<small>${cur}</small></b></div>
           </div>
-          <div class="btn-row">
-            ${order.fact ? html`<button type="button" class="btn btn--ghost" onClick=${onReopen}>Убрать из статистики</button>` : null}
-            <button type="button" class="btn btn--primary" disabled=${noTime} onClick=${() => onSave(full)}>${Icon.check()}<span>Сохранить в статистику</span></button>
-          </div>
-        </footer>
+          ${noTime ? html`<p class="fact__warn">Укажите время — без него час не посчитать и заказ не попадёт в средний час.</p>` : null}
+        </div>
       </div>
-    </div>`;
+    </section>`;
 }
 
 // ── Статистика ──────────────────────────────────────────────────
@@ -366,14 +366,14 @@ export function StatsPage({ orders, settings }) {
         ${!anyDone ? html`
           <div class="card empty">
             <h3>Пока нет выполненных заказов</h3>
-            <p>Сохранённые расчёты в статистику не попадают. Откройте расчёт и нажмите «Заказ выполнен», укажите, сколько получили и сколько времени ушло — тогда он появится здесь.</p>
-            <a class="btn btn--primary" href="#orders">К расчётам</a>
+            <p>Сохранённые расчёты в статистику не попадают. Откройте заказ, переключите статус на «Выполнен» и укажите, сколько получили и сколько времени ушло — тогда он появится здесь.</p>
+            <a class="btn btn--primary" href="#orders">К заказам</a>
           </div>` : html`
           <div class="kpis">
             <div class=${'card kpi kpi--main is-' + (st.avgRate >= num(cost.rateTarget) ? 'good' : st.avgRate >= num(cost.rateMin) ? 'warn' : 'bad')}>
               <span class="eyebrow">Ваш час в среднем (чистыми, за вычетом расходов)</span>
               <b>${fmtInt(st.avgRate)}<small>${cur}/ч</small></b>
-              <p>желаемый ${fmtInt(cost.rateTarget)} · минимум ${fmtInt(cost.rateMin)}</p>
+              <p>желаемый ${fmtInt(cost.rateTarget)} · минимум ${fmtInt(cost.rateMin)}${st.noTime ? ` · без времени ${st.noTime} ${plural(st.noTime, ['заказ', 'заказа', 'заказов'])} не учтено` : ''}</p>
             </div>
             <div class="card kpi"><span class="eyebrow">Средняя цена за м²</span><b>${fmtInt(st.avgPerM2)}<small>${cur}</small></b><p>${fmtArea(st.area)} м² всего</p></div>
             <div class="card kpi"><span class="eyebrow">Средний заказ</span><b>${fmtInt(st.avgCheck)}<small>${cur}</small></b><p>${st.count} ${plural(st.count, ['заказ', 'заказа', 'заказов'])}</p></div>

@@ -335,7 +335,8 @@ export function factSummary(order) {
   const h = f.hours || {};
   const total = f.hoursMode === 'total';
   const servicesHours = Object.values(h.services || {}).reduce((s, v) => s + num(v), 0);
-  const hours = total ? num(h.total) : num(h.sand) + num(h.coat) + num(h.stain) + servicesHours + num(h.travel) + num(h.other);
+  // Дорога учитывается всегда: и при вводе по этапам, и когда указано только общее время работы.
+  const hours = total ? num(h.total) + num(h.travel) : num(h.sand) + num(h.coat) + num(h.stain) + servicesHours + num(h.travel) + num(h.other);
   const expenses = num(f.materialsCost) + num(f.carCost) + num(f.expenses);
   const received = num(f.received);
   const profit = received - expenses;
@@ -347,10 +348,16 @@ export function factSummary(order) {
   };
 }
 
+/** Последние расчёты: запись обновляется по rid, новые сверху, хранится не больше max штук. */
+export function upsertRecent(list, entry, max = 10) {
+  return [entry, ...(list || []).filter((e) => e.rid !== entry.rid)].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, max);
+}
+
 /** Сводная статистика по выполненным заказам. */
 export function aggregateStats(orders) {
   const done = (orders || []).filter((o) => !o.deleted && o.fact);
-  const sum = { count: 0, received: 0, profit: 0, hours: 0, area: 0, expenses: 0, stages: 0 };
+  // rateProfit/rateHours — только заказы с указанным временем: без времени час посчитать нельзя.
+  const sum = { count: 0, received: 0, profit: 0, hours: 0, area: 0, expenses: 0, stages: 0, rateProfit: 0, rateHours: 0, noTime: 0 };
   const acc = () => ({ h: 0, area: 0, n: 0 });
   const sand = { oil: acc(), lacquer: acc() }, coat = { oil: acc(), lacquer: acc() }, stain = acc();
   const services = {}, materials = {}, months = {};
@@ -358,6 +365,7 @@ export function aggregateStats(orders) {
   for (const o of done) {
     const f = o.fact, fs = factSummary(o), h = f.hours || {};
     sum.count++; sum.received += fs.received; sum.profit += fs.profit; sum.hours += fs.hours; sum.area += fs.area; sum.expenses += fs.expenses;
+    if (fs.hours > 0) { sum.rateProfit += fs.profit; sum.rateHours += fs.hours; } else sum.noTime++;
     if (fs.byStages) {
       sum.stages++;
       add(sand[f.old === 'lacquer' ? 'lacquer' : 'oil'], num(h.sand), fs.area);
@@ -372,21 +380,22 @@ export function aggregateStats(orders) {
       if (num(v) > 0 && fs.area > 0) { materials[id] ||= { ml: 0, area: 0, n: 0 }; materials[id].ml += num(v); materials[id].area += fs.area; materials[id].n++; }
     }
     const key = String(f.date || '').slice(0, 7) || 'без даты';
-    months[key] ||= { key, count: 0, received: 0, profit: 0, hours: 0, area: 0 };
+    months[key] ||= { key, count: 0, received: 0, profit: 0, hours: 0, area: 0, rateProfit: 0, rateHours: 0 };
     const m = months[key];
     m.count++; m.received += fs.received; m.profit += fs.profit; m.hours += fs.hours; m.area += fs.area;
+    if (fs.hours > 0) { m.rateProfit += fs.profit; m.rateHours += fs.hours; }
   }
   const div = (a, b) => (b > 0 ? a / b : 0);
   const norm = (a) => ({ n: a.n, perM2: div(a.h, a.area) });
   return {
     ...sum,
-    avgCheck: div(sum.received, sum.count), avgPerM2: div(sum.received, sum.area), avgRate: div(sum.profit, sum.hours),
+    avgCheck: div(sum.received, sum.count), avgPerM2: div(sum.received, sum.area), avgRate: div(sum.rateProfit, sum.rateHours),
     sand: { oil: norm(sand.oil), lacquer: norm(sand.lacquer) },
     coat: { oil: norm(coat.oil), lacquer: norm(coat.lacquer) },
     stain: norm(stain),
     services: Object.fromEntries(Object.entries(services).map(([id, v]) => [id, { n: v.n, hours: div(v.hours, v.n) }])),
     materials: Object.fromEntries(Object.entries(materials).map(([id, v]) => [id, { n: v.n, perM2: div(v.ml, v.area) }])),
-    months: Object.values(months).sort((a, b) => (a.key < b.key ? 1 : -1)).map((m) => ({ ...m, rate: div(m.profit, m.hours) })),
+    months: Object.values(months).sort((a, b) => (a.key < b.key ? 1 : -1)).map((m) => ({ ...m, rate: div(m.rateProfit, m.rateHours) })),
   };
 }
 

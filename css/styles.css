@@ -946,3 +946,41 @@ html.is-locked { overflow: hidden; }
   .clear-btn { padding: 9px 12px; gap: 6px; font-size: 13.5px; }
   .order__actions .btn--fact span { display: inline; }
 }
+
+
+/* ── Пятая версия: страница заказа, статус, последние расчёты ── */
+
+.ohead { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.ohead__back { display: inline-flex; align-items: center; gap: 6px; justify-self: start; font-size: 14.5px; font-weight: 500; color: var(--muted); padding: 4px 8px 4px 0; transition: color .15s; }
+.ohead__back:hover { color: var(--accent); }
+.ohead__row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ohead__title { min-width: 0; }
+.ohead__title h1 { margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -.03em; line-height: 1.15; overflow-wrap: anywhere; }
+.ohead__title p { font-size: 13.5px; color: var(--muted); margin-top: 6px; }
+.status { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); }
+.seg--status { display: flex; }
+.seg--status .seg__btn { flex: 1; text-align: center; padding: 11px 12px; font-size: 15.5px; }
+.seg--status .seg__btn.is-done { background: var(--ok); color: #fff; box-shadow: none; }
+.status__hint { font-size: 13.5px; color: var(--muted); line-height: 1.4; padding: 0 4px; }
+
+.client__save { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; padding-top: 18px; border-top: 1px solid var(--line); }
+.client__save p { font-size: 13.5px; color: var(--muted); max-width: 44ch; }
+.total__head .btn--sm { height: 36px; padding: 0 14px; }
+
+.fact__result { padding-top: 16px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.fact__warn { font-size: 13px; color: var(--accent); }
+
+
+@media (max-width: 720px) {
+  .ohead__title h1 { font-size: 25px; }
+  .status { padding: 10px; }
+}
+
+/* Номер раздела держится у первой строки заголовка, даже если подзаголовок в две строки */
+.section__no { align-self: flex-start; padding: 13px 0 0; }
+.section__head:has(.section__title--edit) .section__no { align-self: center; padding: 0; }
+@media (max-width: 720px) {
+  .section__no { padding-top: 10px; }
+  .seg--tabs .seg__btn { padding: 11px 4px; font-size: 14px; }
+  .seg--tabs sup { margin-left: 3px; }
+}

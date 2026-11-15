@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   num, itemGeometry, faceArea, shapeSides, shapeOutline, polyArea, setSideLength,
-  calcTotals, calcCost, materialCostPerM2, factSummary, aggregateStats, sandHours, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
+  calcTotals, calcCost, materialCostPerM2, factSummary, aggregateStats, sandHours, upsertRecent, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
 } from '../js/calc.js';
 import { defaultSettings, defaultDraft, newItem, normalizeDraft, normalizeSettings, DEFAULT_TEMPLATES } from '../js/defaults.js';
 
@@ -321,18 +321,38 @@ test('статистика: этапы, общее время и старое п
   } });
   const a = mk('a', {});
   const b = mk('b', { date: '2026-11-02', coat: 'lacquer', old: 'lacquer', received: 50000, area: 3, hours: { sand: 3, coat: 2, services: {} }, materials: {} });
-  const c = mk('c', { date: '2026-11-03', hoursMode: 'total', received: 20000, area: 1, hours: { total: 4, sand: 99, coat: 99, services: { sink: 99 } }, materials: { 'm-oil': 100 }, materialsCost: 500 });
+  const c = mk('c', { date: '2026-11-03', hoursMode: 'total', received: 20000, area: 1, hours: { total: 4, travel: 1, sand: 99, coat: 99, services: { sink: 99 } }, materials: { 'm-oil': 100 }, materialsCost: 500 });
   near(factSummary(a).hours, 3);                        // 1,2 + 0,8 + раковина 1
   near(factSummary(a).rate, 29000 / 3);
-  near(factSummary(c).hours, 4);                        // только общее, этапы игнорируются
-  near(factSummary(c).rate, 19500 / 4);
+  near(factSummary(c).hours, 5);                        // общее время работы 4 + дорога 1; этапы игнорируются
+  near(factSummary(c).rate, 19500 / 5);
   assert.equal(factSummary(c).byStages, false);
   const st = aggregateStats([a, b, c, { id: 'x', fact: null }, { ...a, deleted: true }]);
   assert.equal(st.count, 3); assert.equal(st.stages, 2);
-  near(st.avgCheck, 100000 / 3); near(st.avgRate, (29000 + 49000 + 19500) / (3 + 5 + 4));
+  near(st.avgCheck, 100000 / 3); near(st.avgRate, (29000 + 49000 + 19500) / (3 + 5 + 5));
   near(st.sand.oil.perM2, 0.6); near(st.sand.lacquer.perM2, 1);   // c в нормы не попал
   near(st.coat.oil.perM2, 0.4); near(st.coat.lacquer.perM2, 2 / 3);
   near(st.services.sink.hours, 1); assert.equal(st.services.sink.n, 1);
   near(st.materials['m-oil'].perM2, 300 / 3 );                    // расход считается и по заказу с общим временем
   assert.deepEqual(st.months.map((m) => m.key), ['2026-11', '2026-10']);
+});
+
+test('заказ без времени не искажает средний час', () => {
+  const o = (id, received, h) => ({ id, fact: { date: '2026-11-01', coat: 'oil', old: 'oil', received, area: 1, hoursMode: 'total', hours: { total: h, travel: '' }, materials: {}, materialsCost: 0, carCost: 0, expenses: '' } });
+  const st = aggregateStats([o('a', 10000, 2), o('b', 50000, 0)]);
+  assert.equal(st.count, 2); assert.equal(st.noTime, 1);
+  near(st.avgRate, 5000);                               // заказ без времени в час не входит
+  near(st.profit, 60000);                               // но в прибыль и выручку входит
+  near(st.months[0].rate, 5000);
+});
+
+test('последние расчёты: обновление по rid и не больше 10', () => {
+  let list = [];
+  for (let i = 0; i < 12; i++) list = upsertRecent(list, { rid: 'r' + i, updatedAt: i + 1 });
+  assert.equal(list.length, 10);
+  assert.equal(list[0].rid, 'r11'); assert.equal(list.at(-1).rid, 'r2');
+  // правка уже существующего расчёта не плодит запись, а поднимает её наверх
+  list = upsertRecent(list, { rid: 'r5', updatedAt: 100, extra: true });
+  assert.equal(list.length, 10); assert.equal(list[0].rid, 'r5'); assert.ok(list[0].extra);
+  assert.equal(list.filter((e) => e.rid === 'r5').length, 1);
 });

@@ -85,6 +85,7 @@ export function defaultDraft(settings) {
   return {
     v: 1,
     id: null,
+    rid: uid(),                           // номер расчёта в «Последних»: правки того же расчёта обновляют одну запись
     mode: 'surfaces',                     // что считаем: surfaces | stairs
     current: 'oil',                       // что на поверхности сейчас: oil | lacquer (влияет на шлифовку)
     coat: 'oil',                          // чем покрываем: oil | lacquer
@@ -149,6 +150,7 @@ export function normalizeDraft(raw, settings) {
   return {
     ...d, ...raw,
     id: raw.id || null,
+    rid: raw.rid || uid(),
     mode: draftMode(raw),
     finish: { ...d.finish, ...(raw.finish || {}) },
     stain: { ...d.stain, ...(raw.stain || {}) },
