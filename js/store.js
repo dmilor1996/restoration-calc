@@ -37,7 +37,6 @@ export function saveTheme(t) {
 
 export const cloudConfigured = Boolean(firebaseConfig && firebaseConfig.apiKey);
 
-const FB = 'https://www.gstatic.com/firebasejs/10.14.1';
 let fb = null;
 
 /**
@@ -49,13 +48,18 @@ let fb = null;
 export async function initCloud(handlers) {
   if (!cloudConfigured) return;
   try {
-    const [appM, authM, fsM] = await Promise.all([
-      import(`${FB}/firebase-app.js`),
-      import(`${FB}/firebase-auth.js`),
-      import(`${FB}/firebase-firestore.js`),
-    ]);
-    const app = appM.initializeApp(firebaseConfig);
-    fb = { authM, fsM, auth: authM.getAuth(app), db: fsM.getFirestore(app), user: null, unsub: null, unsubOrders: null };
+    // Локальная копия Firebase SDK (js/vendor/firebase.js): работает без CDN и без интернета.
+    const m = await import('./vendor/firebase.js');
+    const app = m.initializeApp(firebaseConfig);
+    // Офлайн-кэш Firestore: правки, сделанные без сети, уйдут в облако при появлении связи.
+    let db;
+    try {
+      db = m.initializeFirestore(app, { localCache: m.persistentLocalCache({ tabManager: m.persistentMultipleTabManager() }) });
+    } catch {
+      db = m.initializeFirestore(app, {});
+    }
+    const authM = m, fsM = m;
+    fb = { authM, fsM, auth: m.getAuth(app), db, user: null, unsub: null, unsubOrders: null };
 
     authM.onAuthStateChanged(fb.auth, (user) => {
       fb.unsub?.();

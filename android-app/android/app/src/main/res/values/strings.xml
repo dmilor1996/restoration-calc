@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Реставрация</string>
+    <string name="title_activity_main">Реставрация</string>
+    <string name="package_name">com.restoration.calc</string>
+    <string name="custom_url_scheme">com.restoration.calc</string>
+</resources>

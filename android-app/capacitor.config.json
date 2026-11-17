@@ -1,0 +1,9 @@
+{
+  "appId": "com.restoration.calc",
+  "appName": "Реставрация",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false,
+    "adjustMarginsForEdgeToEdge": "force"
+  }
+}

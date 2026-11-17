@@ -1,10 +1,11 @@
 // Офлайн-режим: сайт открывается без интернета (например, на выезде).
 // Стратегия: сначала сеть (чтобы обновления приходили сразу), при её отсутствии — сохранённая копия.
 
-const CACHE = 'rc-v6';
+const CACHE = 'rc-v7';
 const CORE = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/cost.js', 'js/ui.js', 'js/diagram.js', 'js/calc.js', 'js/defaults.js', 'js/store.js', 'js/firebase-config.js', 'js/vendor/preact-htm.js',
+  'js/app.js', 'js/cost.js', 'js/ui.js', 'js/diagram.js', 'js/calc.js', 'js/defaults.js', 'js/store.js', 'js/firebase-config.js', 'js/vendor/preact-htm.js', 'js/vendor/firebase.js', 'css/fonts.css',
+  'fonts/Onest-400-cyrillic.woff2', 'fonts/Onest-400-latin.woff2', 'fonts/JetBrainsMono-400-cyrillic.woff2', 'fonts/JetBrainsMono-400-latin.woff2',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
 
