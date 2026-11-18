@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "442442245027",
+    "project_id": "restoration-calc",
+    "storage_bucket": "restoration-calc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:442442245027:android:a2c5abb437ca3c02c2b016",
+        "android_client_info": {
+          "package_name": "com.restoration.calc"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "442442245027-7o63fvuurirtrlubldb189e7ph51mbpe.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABCiw_AlkYeuyJcp3-RLX8-aGrkyBRe5o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "442442245027-7o63fvuurirtrlubldb189e7ph51mbpe.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
