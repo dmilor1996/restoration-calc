@@ -105,12 +105,28 @@ export async function pushOrder(order) {
   await fb.fsM.setDoc(fb.fsM.doc(fb.db, 'users', fb.user.uid, 'orders', clean.id), clean);
 }
 
+// В Android-приложении (Capacitor) Google не пускает во встроенное окно браузера,
+// поэтому вход идёт через системный диалог Google (плагин FirebaseAuthentication),
+// а полученный токен передаётся в Firebase JS SDK.
+const nativePlugin = () => {
+  const cap = globalThis.Capacitor;
+  return cap?.isNativePlatform?.() ? cap.Plugins?.FirebaseAuthentication : null;
+};
+
 export async function signIn() {
   if (!fb) return;
+  const native = nativePlugin();
+  if (native) {
+    const res = await native.signInWithGoogle({ skipNativeAuth: true });
+    const cred = fb.authM.GoogleAuthProvider.credential(res.credential?.idToken, res.credential?.accessToken);
+    await fb.authM.signInWithCredential(fb.auth, cred);
+    return;
+  }
   await fb.authM.signInWithPopup(fb.auth, new fb.authM.GoogleAuthProvider());
 }
 
 export async function signOutCloud() {
   if (!fb) return;
   await fb.authM.signOut(fb.auth);
+  try { await nativePlugin()?.signOut(); } catch { /* noop */ }
 }

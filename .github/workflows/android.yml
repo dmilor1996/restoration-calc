@@ -1,0 +1,90 @@
+name: Android APK
+
+# Сборка Android-приложения. APK появляется во вкладке Actions → выбранный запуск → Artifacts.
+# Для подписи постоянным ключом нужны секреты репозитория RC_KEYSTORE_BASE64 и RC_KEYSTORE_PASSWORD
+# (без них собирается тестовая debug-версия, которая НЕ обновляет установленную release-версию).
+on:
+  push:
+    paths:
+      - 'index.html'
+      - 'manifest.webmanifest'
+      - 'sw.js'
+      - 'css/**'
+      - 'js/**'
+      - 'fonts/**'
+      - 'icons/**'
+      - 'android-app/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Опубликовать APK в разделе Releases (будет виден всем, репозиторий публичный)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      RC_VERSION_CODE: ${{ github.run_number }}
+      RC_VERSION_NAME: 1.0.${{ github.run_number }}
+      HAS_KEYSTORE: ${{ secrets.RC_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: android-app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Зависимости и копия сайта в приложение
+        working-directory: android-app
+        run: |
+          npm ci
+          npm run sync
+
+      - name: Ключ подписи
+        if: env.HAS_KEYSTORE == 'true'
+        run: |
+          echo "${{ secrets.RC_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/restoration.keystore"
+          echo "RC_KEYSTORE=$RUNNER_TEMP/restoration.keystore" >> "$GITHUB_ENV"
+          echo "RC_KEYSTORE_PASSWORD=${{ secrets.RC_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "RC_KEY_ALIAS=restoration" >> "$GITHUB_ENV"
+          echo "RC_KEY_PASSWORD=${{ secrets.RC_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+
+      - name: Сборка release APK (подписанный)
+        if: env.HAS_KEYSTORE == 'true'
+        working-directory: android-app/android
+        run: |
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Restoration.apk"
+
+      - name: Сборка debug APK (тестовый, без постоянного ключа)
+        if: env.HAS_KEYSTORE != 'true'
+        working-directory: android-app/android
+        run: |
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/Restoration.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restoration-apk
+          path: ${{ runner.temp }}/Restoration.apk
+          retention-days: 30
+
+      - name: Публикация в Releases
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release && env.HAS_KEYSTORE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="apk-1.0.${{ github.run_number }}"
+          gh release create "$tag" "$RUNNER_TEMP/Restoration.apk" --title "Приложение $tag" --notes "Сборка из ${{ github.sha }}"

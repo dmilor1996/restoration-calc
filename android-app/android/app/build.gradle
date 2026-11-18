@@ -15,8 +15,9 @@ android {
         applicationId "com.restoration.calc"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // В CI номер = номер запуска + 100, чтобы всегда быть больше локальной версии 1.
+        versionCode System.getenv('RC_VERSION_CODE') ? System.getenv('RC_VERSION_CODE').toInteger() + 100 : 1
+        versionName System.getenv('RC_VERSION_NAME') ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
