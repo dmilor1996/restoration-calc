@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Калькулятор · Моя мастерская</title>
+  <link rel="icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .workshop-return { display:flex; align-items:center; min-height:46px; padding:0 20px; gap:10px; background:#223b33; color:#f6f6e9; font:500 15px Onest,sans-serif; }
+    .workshop-return span { color:#c6e68f; font-size:22px; }
+    body > .workshop-return { position:sticky; top:0; z-index:21; }
+    #app > .top { top:46px; }
+  </style>
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem('rc.theme') || 'auto'; } catch {}</script>
+</head>
+<body>
+  <a class="workshop-return" href="index.html#today"><span aria-hidden="true">←</span> Моя мастерская</a>
+  <div id="app"></div>
+  <script type="module" src="js/app.js"></script>
+</body></html>

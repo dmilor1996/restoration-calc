@@ -14,6 +14,7 @@ on:
       - 'fonts/**'
       - 'icons/**'
       - 'android-app/**'
+      - 'tests/**'
       - '.github/workflows/android.yml'
   workflow_dispatch:
     inputs:
@@ -46,10 +47,11 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Зависимости и копия сайта в приложение
+      - name: Проверки калькулятора и мобильного интерфейса
         working-directory: android-app
         run: |
           npm ci
+          npm test
           npm run sync
 
       - name: Ключ подписи

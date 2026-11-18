@@ -1,14 +1,14 @@
-// Копирует сайт (корень репозитория) в android-app/www — оттуда его берёт Capacitor.
-import { cpSync, rmSync, mkdirSync } from 'node:fs';
+// The two entry points share the original WebView origin and one copy of the engine.
+import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = join(here, '..', '..');
-const out = join(here, '..', 'www');
+const android = fileURLToPath(new URL('../', import.meta.url));
+const root = join(android, '..');
+const out = join(android, 'www');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const f of ['index.html', 'manifest.webmanifest', 'sw.js', 'css', 'js', 'fonts', 'icons']) {
-  cpSync(join(root, f), join(out, f), { recursive: true });
+for (const dir of ['css', 'js', 'fonts', 'icons']) {
+  cpSync(join(root, dir), join(out, dir), { recursive: true });
 }
-console.log('Сайт скопирован в', out);
+cpSync(join(android, 'mobile'), out, { recursive: true });

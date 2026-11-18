@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Сегодня · Моя мастерская</title>
+  <link rel="icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="workshop.css">
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('workshop.theme.v1') || 'auto'; } catch {}
+    // An older installed APK may still have the website's root service worker.
+    navigator.serviceWorker?.getRegistration().then(reg => reg?.update()).catch(() => {});
+  </script>
+</head>
+<body><div id="workshop"></div><script type="module" src="ui/app.js"></script></body>
+</html>
