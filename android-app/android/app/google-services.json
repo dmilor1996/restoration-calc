@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "442442245027-9sib0ah09k96gqvge69bfcqcech9an63.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.restoration.calc",
+            "certificate_hash": "3ac6a9700ba965f45aee4c7c42410bbafd006091"
+          }
+        },
+        {
           "client_id": "442442245027-7o63fvuurirtrlubldb189e7ph51mbpe.apps.googleusercontent.com",
           "client_type": 3
         }
