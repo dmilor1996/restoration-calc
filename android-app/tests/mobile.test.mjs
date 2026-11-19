@@ -44,12 +44,12 @@ test('Простое создание заказа без категории, р
   await page.getByText('В мастерской',{exact:false}).first().waitFor();
   const url=page.url();
   await page.reload();
-  await page.getByRole('link',{name:'Изменить'}).click();
+  await page.getByRole('link',{name:'Изменить',exact:true}).click();
   await page.getByText('Клиент и детали заказа').click();
   await page.getByLabel('Категория для поиска и статистики').selectOption('Подоконник');
   await page.getByRole('button',{name:'Сохранить заказ'}).click();
   await page.waitForURL(url);
-  await page.getByRole('link',{name:'Изменить'}).click();
+  await page.getByRole('link',{name:'Изменить',exact:true}).click();
   await page.getByText('Клиент и детали заказа').click();
   assert.equal(await page.getByLabel('Категория для поиска и статистики').inputValue(),'Подоконник');
   assert.deepEqual(errors,[]);
@@ -81,6 +81,7 @@ test('Рабочий маршрут, отмена ошибки, два дня, �
   await page.getByRole('button',{name:'Шлифовка',exact:true}).first().click();
   await page.clock.fastForward(20*60000);
   await page.getByRole('button',{name:'Пауза',exact:true}).click();
+  await page.getByRole('button',{name:'Продолжить этап'}).waitFor();
   await page.reload();
   await page.getByRole('button',{name:'Продолжить этап'}).click();
   await page.clock.fastForward(10*60000);
@@ -119,7 +120,7 @@ test('Рабочий маршрут, отмена ошибки, два дня, �
   await page.getByLabel('Минуты',{exact:true}).fill('0');
   await page.getByRole('button',{name:'Сохранить время'}).click();
   await page.getByRole('heading',{name:'Дубовая столешница'}).waitFor();
-  await page.getByRole('link',{name:'Изменить'}).click();
+  await page.getByRole('link',{name:'Изменить',exact:true}).click();
   await page.getByLabel('Название или краткое описание').fill('Кухня');
   await page.getByRole('button',{name:'Сохранить заказ'}).click();
   await page.getByRole('heading',{name:'Кухня'}).waitFor();
