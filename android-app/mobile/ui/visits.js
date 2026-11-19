@@ -95,7 +95,7 @@ export function Project({p,projects,run}) {
     <${Facts} rows=${[['Рабочих дней',String(p.visits.length)],...(totals.travel ? [['Дорога',duration(totals.travel)]] : []),
       ...(totals.dry ? [['Сушка',duration(totals.dry)]] : [])]}/></div>`}
     <${VisitHistory} p=${p}/>
-    <${SectionTitle} title="Финансы" href=${path+'/finance'} link="Изменить"/>
+    <${SectionTitle} title="Финансы" href=${path+'/finance'} link="Внести суммы"/>
     <div class="panel"><${Facts} rows=${[['Способ оплаты',paymentLabel],
       ['Получено',money(p.received)],
       ['Материалы',costs.materials===null?(costs.historical?'В прежних общих расходах':'Пока не учтены'):(costs.estimated?'≈ ':'')+money(costs.materials)],
