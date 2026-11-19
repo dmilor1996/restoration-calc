@@ -3,11 +3,11 @@ import { Icon } from './icons.js';
 import { projectStatus } from '../work/model.js';
 
 export const sections = [
-  ['today','Сегодня','today'], ['projects','Объекты','projects'],
+  ['today','Главная','today'], ['projects','Заказы','projects'],
   ['shop','Мастерская','shop'], ['progress','Прогресс','progress'], ['calculator','Калькулятор','calc'],
 ];
 export function sectionHref(id) {
-  return id === 'calculator' ? 'calculator.html#calc' : '#' + id;
+  return '#' + id;
 }
 export function Dock({active}) {
   return html`<nav class="dock" aria-label="Разделы мастерской">${sections.map(([id,label,icon]) =>
