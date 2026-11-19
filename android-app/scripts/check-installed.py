@@ -11,6 +11,10 @@ def adb(*args):
     return subprocess.check_output(["adb", *args], text=True, timeout=18).strip()
 
 
+def bounds(node):
+    return list(map(int, re.findall(r"-?\d+", node.get("bounds", ""))))
+
+
 def find(label, tap=False, scroll=False):
     deadline = time.monotonic() + 45
     labels = []
@@ -19,19 +23,33 @@ def find(label, tap=False, scroll=False):
             adb("shell", "uiautomator", "dump", "/sdcard/workshop-window.xml")
             tree = ET.fromstring(adb("exec-out", "cat", "/sdcard/workshop-window.xml"))
             labels = []
-            for node in tree.iter("node"):
+            nodes = list(tree.iter("node"))
+            dock = next((node for node in nodes if "Разделы мастерской" in
+                         (node.get("text"), node.get("content-desc"))), None)
+            # The HTML dock always occupies the bottom of the viewport. Some
+            # WebView releases flatten its children in the accessibility tree.
+            dock_top = bounds(dock)[1] if dock is not None else 0
+            if dock_top < height // 2:
+                dock_top = height * 85 // 100
+            for node in nodes:
                 names = [node.get("text", ""), node.get("content-desc", "")]
                 labels.extend(filter(None, names))
                 if label not in names:
                     continue
                 if tap:
-                    x1, y1, x2, y2 = map(int, re.findall(r"\d+", node.get("bounds")))
+                    x1, y1, x2, y2 = bounds(node)
+                    # WebView accessibility also exposes controls covered by the fixed dock.
+                    # Tap only their visible area, then scroll and inspect a fresh tree if needed.
+                    in_dock = label in {"Сегодня", "Объекты", "Мастерская", "Прогресс", "Калькулятор"}
+                    y2 = min(y2, height if in_dock else dock_top - 4)
+                    if x2 <= x1 or y2 - y1 < 6:
+                        continue
                     adb("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
                 return
         except (ET.ParseError, subprocess.SubprocessError):
             pass
         if scroll:
-            adb("shell", "input", "swipe", "480", "1330", "480", "650", "350")
+            adb("shell", "input", "swipe", str(width//2), str(height*2//3), str(width//2), str(height//3), "320")
         time.sleep(0.5)
     raise RuntimeError(f"Missing {label!r}. Visible labels: {labels}")
 
@@ -40,6 +58,7 @@ def launch():
     adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity")
 
 
+width, height = map(int, re.findall(r"(\d+)x(\d+)", adb("shell", "wm", "size"))[-1])
 adb("shell", "cmd", "connectivity", "airplane-mode", "enable")
 launch()
 find("Объекты", tap=True)
