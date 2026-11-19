@@ -185,6 +185,11 @@ export function change(p, command, now) {
         'Проверьте количество, цену и единицы материалов.');
       check(new Set(c.materials.map(r=>r.id)).size === c.materials.length,'Повторяющийся материал.');
       p.materials=c.materials.map(r=>({...r,name:r.name.trim()}));
+      if (Object.hasOwn(c,'extraExpenses')) {
+        check(c.extraExpenses === null || (Number.isSafeInteger(c.extraExpenses) && c.extraExpenses >= 0),
+          'Проверьте дополнительные расходы.');
+        p.extraExpenses=c.extraExpenses;
+      }
       p.materialsEdited=true; p.expenseMode='items';
       break;
     case 'reopen': p.doneAt = null; break;
