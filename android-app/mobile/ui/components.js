@@ -1,6 +1,6 @@
 import { html } from '../js/vendor/preact-htm.js';
 import { Icon } from './icons.js';
-import { goal, projectStatus } from './demo.js';
+import { projectStatus } from '../work/model.js';
 
 export const sections = [
   ['today','Сегодня','today'], ['projects','Объекты','projects'],
@@ -22,21 +22,14 @@ export function ThemePicker({theme, onChange}) {
         onChange(key); e.currentTarget.closest('details').open = false;
       }}/>${label}</label>`)}</fieldset></details>`;
 }
-export function Status({project}) {
-  return html`<span class=${'status ' + project.status}><i></i>${projectStatus[project.status]}</span>`;
-}
 export function SectionTitle({title, href, link}) {
   return html`<div class="section-title"><h2>${title}</h2>${href && html`<a href=${href}>${link} <${Icon} name="next" size=${13}/></a>`}</div>`;
 }
 export function ProjectRow({project:p, subtitle}) {
   return html`<a class="row" href=${'#projects/' + p.id}>
-    <img class="thumb" src=${'assets/' + p.art + '.webp'} alt=""/>
-    <div class="row-text"><strong>${p.title}</strong><small>${subtitle || projectStatus[p.status] + ' · ' + p.wood}</small></div>
+    <img class="thumb" src=${artFor(p.type)} alt=""/>
+    <div class="row-text"><strong>${p.title}</strong><small>${subtitle || projectStatus(p) + ' · ' + p.type}</small></div>
     <${Icon} name="next" size=${16}/></a>`;
-}
-export function Goal({count}) {
-  return html`<div class="goal-heading"><strong>Объекты за месяц</strong><b>${count} <small>/ ${goal}</small></b></div>
-    <progress max=${goal} value=${count} aria-label="Завершённые объекты"></progress>`;
 }
 export function Filters({options, value, onChange}) {
   return html`<div class="filters" role="group" aria-label="Фильтр списка">${options.map(([id,label]) =>
@@ -44,4 +37,9 @@ export function Filters({options, value, onChange}) {
 }
 export function Facts({rows}) {
   return html`<dl class="facts">${rows.map(([k,v]) => html`<div key=${k}><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>`;
+}
+
+export function artFor(type) {
+  const art = {'Лестница':'steps','Подоконник':'sill'}[type] || 'table';
+  return 'assets/' + art + '.webp';
 }
