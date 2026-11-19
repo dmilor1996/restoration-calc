@@ -135,8 +135,7 @@ export function MaterialsForm({p,run,reportError}) {
         return {...r,quantity,unitPriceRub};
       });
       const amount=parseMoney(extra);
-      // The two saves are intentional: materials and extra expenses are separate independent revisions.
-      run(p,{kind:'materials',materials:converted},pathFor(p),{extraExpenses:amount});
+      run(p,{kind:'materials',materials:converted,extraExpenses:amount},pathFor(p));
     } catch(error) { reportError(error); }
   }
   const sum=rows.reduce((n,r)=>n+(Number(r.quantity)||0)*(Number(r.unitPriceRub)||0),0);
