@@ -24,6 +24,12 @@ def find(label, tap=False, scroll=False):
             tree = ET.fromstring(adb("exec-out", "cat", "/sdcard/workshop-window.xml"))
             labels = []
             nodes = list(tree.iter("node"))
+            # The emulator launcher can time out during cold boot and cover the
+            # already started activity. Recover only from this unrelated dialog.
+            if any(node.get("text") == "Pixel Launcher isn't responding" for node in nodes):
+                adb("shell", "am", "force-stop", "com.google.android.apps.nexuslauncher")
+                launch()
+                continue
             dock = next((node for node in nodes if "Разделы мастерской" in
                          (node.get("text"), node.get("content-desc"))), None)
             # The HTML dock always occupies the bottom of the viewport. Some
