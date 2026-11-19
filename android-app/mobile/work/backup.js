@@ -1,4 +1,4 @@
-import { check, openVisit, payments, types } from './model.js';
+import { check, openVisit, payments, types, paymentMethods, clientKinds } from './model.js';
 const format = 'restoration.workshop.projects';
 const text = v => typeof v === 'string';
 const id = v => text(v) && /^[0-9a-f-]{36}$/i.test(v);
@@ -30,6 +30,15 @@ function validateVisit(v) {
   }
   if (!v.manual) requireValid(ended === (v.endedAt !== null));
 }
+function validateMaterials(rows) {
+  requireValid(Array.isArray(rows) && rows.length<=100 && unique(rows.map(r=>r.id)));
+  for(const r of rows) {
+    requireValid(text(r.id) && r.id && text(r.name) && r.name.trim() && r.name.length<=150);
+    requireValid(['мл','г','шт','л','кг'].includes(r.unit) &&
+      Number.isFinite(r.quantity) && r.quantity>=0 && r.quantity<=1000000 &&
+      Number.isFinite(r.unitPriceRub) && r.unitPriceRub>=0 && r.unitPriceRub<=10000000);
+  }
+}
 function validateProject(p) {
   requireValid(p && p.version === 1 && id(p.id) && Number.isSafeInteger(p.rev) && p.rev >= 1);
   requireValid(stamp(p.createdAt) && stamp(p.updatedAt) && (p.doneAt === null || stamp(p.doneAt)));
@@ -37,6 +46,16 @@ function validateProject(p) {
   requireValid(!p.scheduled || /^\d{4}-\d\d-\d\d$/.test(p.scheduled));
   requireValid(Array.isArray(p.stages) && p.stages.length && p.stages.every(s => text(s) && s.trim()) && unique(p.stages));
   requireValid(payments.includes(p.payment) && amount(p.received) && amount(p.expenses) && typeof p.estimated === 'boolean');
+  if(p.workplace !== undefined) requireValid(['client','workshop'].includes(p.workplace));
+  if(p.paymentMethod !== undefined) requireValid(paymentMethods.includes(p.paymentMethod));
+  if(p.clientKind !== undefined) requireValid(clientKinds.includes(p.clientKind));
+  if(p.expenseMode !== undefined) {
+    requireValid(['items','manual'].includes(p.expenseMode) && amount(p.extraExpenses ?? null));
+    requireValid(typeof p.materialsEdited==='boolean');
+    validateMaterials(p.materials);
+  }
+  if(p.legacy?.materials!==undefined) validateMaterials(p.legacy.materials);
+
   requireValid(p.legacy === null || (p.legacy && text(p.legacy.id) && p.legacy.id && text(p.legacy.label) &&
     text(p.legacy.currency) && amount(p.legacy.price)));
   requireValid(Array.isArray(p.visits) && unique(p.visits.map(v => v.id)));
