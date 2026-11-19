@@ -1,3 +1,12 @@
+// Google-hosted Maven Central mirror also serves plugin buildscript dependencies.
+// CI previously failed fetching the same dependencies from Central with HTTP 429.
+gradle.beforeProject { project ->
+    [project.buildscript.repositories, project.repositories].each { repos ->
+        repos.google()
+        repos.maven { url = uri('https://maven-central.storage-download.googleapis.com/maven2/') }
+    }
+}
+
 include ':app'
 include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')

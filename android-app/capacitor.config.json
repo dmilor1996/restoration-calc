@@ -1,6 +1,6 @@
 {
   "appId": "com.restoration.calc",
-  "appName": "Реставрация",
+  "appName": "Моя мастерская",
   "webDir": "www",
   "android": {
     "allowMixedContent": false,
