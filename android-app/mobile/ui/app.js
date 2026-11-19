@@ -5,25 +5,28 @@ import { inventory } from './demo.js';
 import { Workshop, StockItem } from './screens.js';
 import { Today, Projects, Progress } from './overview.js';
 import { Project } from './visits.js';
-import { Backup, FinanceForm, ProjectForm, VisitForm } from './forms.js';
+import { Backup, FinanceForm, MaterialsForm, ProjectForm, VisitForm } from './forms.js';
+import { QuickCalc } from './quickcalc.js';
 import { importMissing, listProjects, onExternalChange, saveCommand } from '../work/store.js';
 
 function screen(hash,props) {
   const [section,id,action,visitId] = hash.slice(1).split('/');
   const {projects} = props;
   if (section === 'projects') {
-    if (id === 'new') return ['projects','Новый объект',html`<${ProjectForm} ...${props}/>`];
+    if (id === 'new') return ['projects','Новый заказ',html`<${ProjectForm} ...${props}/>`];
     if (id === 'backup') return ['projects','Резервная копия',html`<${Backup} ...${props}/>`];
     const p=projects.find(x=>x.id===id);
-    if (!p && id) return ['projects','Объект не найден',html`<h1>Объект не найден</h1><a class="primary" href="#projects">К объектам</a>`];
+    if (!p && id) return ['projects','Заказ не найден',html`<h1>Заказ не найден</h1><a class="primary" href="#projects">К заказам</a>`];
     if (p) {
       const v=p.visits.find(s=>s.id===visitId && s.endedAt !== null);
       if (action === 'edit') return [section,p.title,html`<${ProjectForm} p=${p} ...${props}/>`];
       if (action === 'manual' || (action === 'time' && v)) return [section,p.title,html`<${VisitForm} p=${p} v=${v} ...${props}/>`];
       if (action === 'finance' || action === 'finish') return [section,p.title,html`<${FinanceForm} p=${p} finish=${action==='finish'} ...${props}/>`];
+      if (action === 'materials') return [section,p.title,html`<${MaterialsForm} p=${p} ...${props}/>`];
       return [section,p.title,html`<${Project} p=${p} ...${props}/>`];
     }
   }
+  if (section === 'calculator') return ['calculator','Калькулятор',html`<${QuickCalc} ...${props}/>`];
   const item=section==='shop' && inventory.find(x=>x.id===id);
   if (item) return [section,item.title,html`<${StockItem} item=${item}/>`];
   const pages={today:Today,projects:Projects,shop:Workshop,progress:Progress};
