@@ -26,7 +26,7 @@ function ActiveVisit({p,v,run}) {
   const clock = s => s === null ? '0:00:00' : duration(Math.max(0,now-s),true);
   const doneLabels = {'Шлифовка':'Завершить шлифовку','Подготовка':'Завершить подготовку','Уборка':'Завершить уборку','Покрытие':'Завершить покрытие'};
   return html`<section class="live">
-    <div class="live-top"><span class="live-dot"></span>Выезд ${p.visits.filter(x=>!x.manual).indexOf(v)+1}<small>${dayText(v.startedAt)}</small></div>
+    <div class="live-top"><span class="live-dot"></span>Выезд ${p.visits.filter(visit=>visit.startedAt <= v.startedAt).length}<small>${dayText(v.startedAt)}</small></div>
     <h2>${stats.running || (stats.paused ? 'Пауза' : 'Выберите этап')}</h2>
     ${stats.running ? html`<div class="digits">${clock(stats.since)}</div>` : html`<p>${stats.paused || 'Таймер работы остановлен'}</p>`}
     <p class="live-total">Активная работа за выезд <b>${duration(stats.active,true)}</b></p>
@@ -53,7 +53,9 @@ function VisitHistory({p}) {
     ${!visits.length && html`<p class="hint">Начните таймер на объекте или запишите время после работы.</p>`}
     <div class="rows">${visits.map(v=>{
       const stats = visitStats(v);
-      return html`<details key=${v.id} class="fold visit"><summary><span>${dayText(v.startedAt)}<small>${v.manual ? 'Внесён вручную' : v.endedAt === null ? 'Идёт выезд' : 'Выезд завершён'}</small></span>
+      const time = ms => new Date(ms).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+      const period = v.manual ? 'Внесён вручную' : time(v.startedAt) + ' — ' + (v.endedAt === null ? 'сейчас' : time(v.endedAt));
+      return html`<details key=${v.id} class="fold visit"><summary><span>${dayText(v.startedAt)}<small>${period}</small></span>
       <b>${v.endedAt === null ? 'Сейчас' : duration(stats.active)}</b></summary>
       <${Facts} rows=${[...Array.from(stats.byStage,([stage,ms])=>[stage,duration(ms,true)]),
         ...(stats.dry ? [['Сушка параллельно',duration(stats.dry,true)]] : []),

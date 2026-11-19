@@ -17,7 +17,7 @@ export function Today({projects}) {
   return html`<p class="dateline">${new Date(now).toLocaleDateString('ru-RU',{weekday:'long',month:'long',day:'numeric'})}</p><h1>Сегодня</h1>
     <a class="hero" href=${featured ? pathFor(featured) : '#projects/new'}><div class="hero-image"><img src=${artFor(featured?.type)} alt=""/>
     ${featured && html`<span class="hero-tag"><i></i>${projectStatus(featured)}</span>`}</div>
-    <div class="hero-body"><small>${featured?.type || 'Моя мастерская'}</small><h2>${featured?.title || 'Первый объект'}</h2>
+    <div class="hero-body"><small>${featured?.type || 'Моя мастерская'}</small><h2>${featured?.title || (projects.length ? 'Новый объект' : 'Первый объект')}</h2>
     <div class="hero-footer"><span>${stage ? (stage.running || (stage.paused ? 'Пауза' : 'Между этапами'))+' · '+duration(stage.active,true) :
       featured ? 'Открыть объект' : 'Создать объект'}</span><span class="round-arrow"><${Icon} name="arrow"/></span></div></div></a>
     <${SectionTitle} title="Ближайшие выезды" href="#projects" link="Объекты"/>
