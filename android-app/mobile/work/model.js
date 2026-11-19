@@ -155,6 +155,7 @@ export function change(p, command, now) {
         // Backwards-compatible command from pre-itemized clients.
         check(c.expenses === null || (Number.isSafeInteger(c.expenses) && c.expenses >= 0),'Проверьте сумму.');
         p.expenses = c.expenses;
+        p.expenseMode = 'manual';
       }
       if (Object.hasOwn(c,'payment')) {
         check(payments.includes(c.payment),'Проверьте статус оплаты.');
@@ -202,7 +203,13 @@ export function change(p, command, now) {
           const last=v.events.at(-1);
           check(v.events.length>1 && ['stage','ready','pause','dry-start','dry-stop'].includes(last?.kind),
             'Последнее действие нельзя отменить.');
-          v.events.pop(); break;
+          v.events.pop();
+          // A custom stage added by mistake must not pollute the selector forever.
+          if (last.kind === 'stage' && !template().includes(last.stage) &&
+              !p.visits.some(x=>x.events.some(e=>e.kind==='stage' && e.stage===last.stage))) {
+            p.stages=p.stages.filter(stage=>stage!==last.stage);
+          }
+          break;
         }
         case 'stage':
           check(typeof c.stage === 'string' && c.stage.trim(), 'Введите название этапа.');
