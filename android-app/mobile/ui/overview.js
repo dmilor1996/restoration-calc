@@ -14,24 +14,24 @@ export function Today({projects}) {
   const featured = live || scheduled[0] || todo[0];
   const stage = live && visitStats(openVisit(live),now);
   const done = projects.filter(p=>p.doneAt !== null);
-  return html`<p class="dateline">${new Date(now).toLocaleDateString('ru-RU',{weekday:'long',month:'long',day:'numeric'})}</p><h1>Сегодня</h1>
+  return html`<p class="dateline">${new Date(now).toLocaleDateString('ru-RU',{weekday:'long',month:'long',day:'numeric'})}</p><h1>В работе</h1>
     <a class="hero" href=${featured ? pathFor(featured) : '#projects/new'}><div class="hero-image"><img src=${artFor(featured?.type)} alt=""/>
     ${featured && html`<span class="hero-tag"><i></i>${projectStatus(featured)}</span>`}</div>
-    <div class="hero-body"><small>${featured?.type || 'Моя мастерская'}</small><h2>${featured?.title || (projects.length ? 'Новый объект' : 'Первый объект')}</h2>
+    <div class="hero-body"><small>${featured?.type || 'Моя мастерская'}</small><h2>${featured?.title || (projects.length ? 'Новый заказ' : 'Первый заказ')}</h2>
     <div class="hero-footer"><span>${stage ? (stage.running || (stage.paused ? 'Пауза' : 'Между этапами'))+' · '+duration(stage.active,true) :
-      featured ? 'Открыть объект' : 'Создать объект'}</span><span class="round-arrow"><${Icon} name="arrow"/></span></div></div></a>
-    <${SectionTitle} title="Ближайшие выезды" href="#projects" link="Объекты"/>
-    ${scheduled.length ? html`<div class="rows">${scheduled.slice(0,3).map(p=>html`<${ProjectRow} key=${p.id} project=${p} subtitle=${p.scheduled+' · '+(p.address || p.type)}/>`)}</div>` : html`<p class="hint">Запланированных выездов пока нет.</p>`}
+      featured ? 'Открыть заказ' : 'Создать заказ'}</span><span class="round-arrow"><${Icon} name="arrow"/></span></div></div></a>
+    <${SectionTitle} title="Запланированные работы" href="#projects" link="Заказы"/>
+    ${scheduled.length ? html`<div class="rows">${scheduled.slice(0,3).map(p=>html`<${ProjectRow} key=${p.id} project=${p} subtitle=${p.scheduled+' · '+(p.address || p.type)}/>`)}</div>` : html`<p class="hint">Запланированных работ пока нет.</p>`}
     <${SectionTitle} title="Моя работа" href="#progress" link="Итоги"/>
-    <div class="panel"><${Facts} rows=${[['Открытые объекты',projects.length-done.length],['Завершённые',done.length]]}/></div>`;
+    <div class="panel"><${Facts} rows=${[['Открытые заказы',projects.length-done.length],['Завершённые',done.length]]}/></div>`;
 }
 export function Projects({projects}) {
   const [filter,setFilter]=useState('all');
   const shown=projects.filter(p=>filter === 'all' || (filter === 'done') === (p.doneAt !== null));
-  return html`<h1>Объекты</h1><a class="primary" href="#projects/new">Создать объект</a>
+  return html`<h1>Заказы</h1><a class="primary" href="#projects/new">Новый заказ</a>
     <div class="spaced"><${Filters} options=${[['all','Все'],['open','Открытые'],['done','Завершённые']]} value=${filter} onChange=${setFilter}/></div>
     <div class="rows">${shown.map(p=>html`<${ProjectRow} key=${p.id} project=${p}/>`)}</div>
-    ${!shown.length && html`<p class="hint">${projects.length ? 'В этом списке пока пусто.' : 'Здесь появятся ваши объекты и история выездов.'}</p>`}
+    ${!shown.length && html`<p class="hint">${projects.length ? 'В этом списке пока пусто.' : 'Здесь появятся ваши заказы и рабочие дни.'}</p>`}
     <${SectionTitle} title="Расчёты и данные"/><div class="rows"><a class="row" href="calculator.html#orders"><span class="tile"><${Icon} name="calc"/></span><strong>Заказы калькулятора</strong></a>
     <a class="row" href="#projects/backup"><span class="tile"><${Icon} name="shop"/></span><strong>Резервная копия</strong></a></div>`;
 }
