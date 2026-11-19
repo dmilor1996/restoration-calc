@@ -11,7 +11,7 @@ def adb(*args):
     return subprocess.check_output(["adb", *args], text=True, timeout=18).strip()
 
 
-def find(label, tap=False):
+def find(label, tap=False, scroll=False):
     deadline = time.monotonic() + 45
     labels = []
     while time.monotonic() < deadline:
@@ -30,6 +30,8 @@ def find(label, tap=False):
                 return
         except (ET.ParseError, subprocess.SubprocessError):
             pass
+        if scroll:
+            adb("shell", "input", "swipe", "480", "1330", "480", "650", "350")
         time.sleep(0.5)
     raise RuntimeError(f"Missing {label!r}. Visible labels: {labels}")
 
@@ -40,17 +42,26 @@ def launch():
 
 adb("shell", "cmd", "connectivity", "airplane-mode", "enable")
 launch()
-find("Демоданные")
-find("Мастерская", tap=True)
-find("Расходники", tap=True)
-find("3M Xtract 710W")
-adb("shell", "input", "keyevent", "KEYCODE_BACK")
-find("Ближайший выезд")
+find("Объекты", tap=True)
+find("Создать объект", tap=True)
+find("Новый объект")
+find("Создать объект", tap=True)
+find("Начать работу", tap=True)
+find("Пауза", tap=True)
+find("Продолжить этап")
+adb("shell", "am", "force-stop", PACKAGE)
+launch()
+find("Столешница", tap=True)
+find("Продолжить этап", tap=True)
+find("Завершить выезд", tap=True, scroll=True)
+find("Начать новый выезд", tap=True)
+find("Пауза")
+adb("shell", "am", "force-stop", PACKAGE)
+launch()
+find("Столешница", tap=True)
+find("Пауза")
 find("Калькулятор", tap=True)
 find("Заказы")
 adb("shell", "input", "keyevent", "KEYCODE_BACK")
-find("Ближайший выезд")
-adb("shell", "am", "force-stop", PACKAGE)
-launch()
-find("Демоданные")
-print("Offline cold launch, workshop, calculator, native Back and restart passed.")
+find("Пауза")
+print("Offline create, pause, process death, resume, second visit, calculator and native Back passed.")
