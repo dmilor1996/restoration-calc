@@ -36,7 +36,7 @@ export function ProjectForm({p,projects,run}) {
     <h1>${p ? 'Редактировать объект' : 'Новый объект'}</h1>
     <form class="editor" onSubmit=${submit}>
       <${Field} label="Название"><input name="title" maxlength="200" defaultValue=${p?.title || ''} placeholder=${type}/><//>
-      <${Field} label="Тип работы"><select value=${type} onChange=${e=>changeType(e.target.value)}>${types.map(t=>html`<option key=${t}>${t}</option>`)}</select><//>
+      <${Field} label="Тип работы"><select aria-label="Тип работы" value=${type} onChange=${e=>changeType(e.target.value)}>${types.map(t=>html`<option key=${t} value=${t}>${t}</option>`)}</select><//>
       <details class="fold" open=${p && !!(p.legacy || p.scheduled || p.address || p.client || p.note)}>
         <summary>Клиент, выезд и расчёт</summary>
         <${Field} label="Сохранённый расчёт"><select aria-label="Сохранённый расчёт" value=${orderId} onChange=${e=>setOrderId(e.target.value)}>

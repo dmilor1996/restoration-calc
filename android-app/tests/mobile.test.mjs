@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { chromium } from 'playwright-core';
-test('Упакованный интерфейс офлайн, переходы, темы и совместимость заказов', async t => {
+async function openWorkshop(t) {
   const mime = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.webp':'image/webp','.woff2':'font/woff2','.svg':'image/svg+xml'};
   const root = new URL('../www/',import.meta.url);
   const server = createServer((req,res) => {
@@ -31,6 +31,40 @@ test('Упакованный интерфейс офлайн, переходы, 
   page.on('pageerror', e => errors.push(e.message));
   page.setDefaultTimeout(6000);
   await page.goto(origin);
+  return {page,origin,external,errors};
+}
+test('Создание и редактирование объекта с каждым типом работы', async t => {
+  const {page,origin,errors} = await openWorkshop(t);
+  const types = ['Столешница','Подоконник','Лестница','Стол','Другая работа'];
+  const typePicker = page.getByRole('combobox',{name:'Тип работы',exact:true});
+  for (const [i,type] of types.entries()) {
+    await page.goto(origin + '/#projects/new');
+    // Opening the picker and changing back also exercises the default option's DOM value.
+    await typePicker.selectOption({label:types[(i+1)%types.length]});
+    await typePicker.selectOption({label:type});
+    assert.equal(await typePicker.inputValue(),type);
+    await page.getByRole('button',{name:'Создать объект'}).click();
+    await page.getByRole('heading',{name:type,exact:true}).waitFor();
+    const projectUrl = page.url();
+    await page.reload();
+    await page.getByRole('link',{name:'Изменить',exact:true}).click();
+    assert.equal(await typePicker.inputValue(),type);
+    const nextType = types[(i+1)%types.length];
+    await typePicker.selectOption({label:nextType});
+    await page.getByRole('button',{name:'Сохранить изменения'}).click();
+    await page.waitForURL(projectUrl);
+    await page.getByRole('link',{name:'Изменить',exact:true}).click();
+    assert.equal(await typePicker.inputValue(),nextType);
+    const savedStages = await page.locator('textarea[rows="8"]').inputValue();
+    assert.equal(savedStages.split('\n').includes('Тонировка'),nextType === 'Лестница');
+    assert.equal(savedStages.split('\n').includes('Демонтаж'),nextType === 'Столешница');
+  }
+  const count = await page.evaluate(async()=> (await (await import('/work/store.js')).listProjects()).length);
+  assert.equal(count,types.length);
+  assert.deepEqual(errors,[]);
+});
+test('Упакованный интерфейс офлайн, переходы, темы и совместимость заказов', async t => {
+  const {page,origin,external,errors} = await openWorkshop(t);
   const order = {id:'legacy-7',updatedAt:10,draft:{client:{name:'Сохранённый заказ'}},totals:{area:2}};
   await page.getByRole('heading',{name:'Сегодня'}).waitFor();
   assert.deepEqual(external,[]);
@@ -86,6 +120,7 @@ test('Упакованный интерфейс офлайн, переходы, 
   await page.getByRole('link',{name:'Внести суммы'}).click();
   await page.getByLabel('Получено всего, ₽').fill('25000');
   await page.getByLabel('Прямые расходы, ₽').fill('2500');
+  await page.getByLabel('Точность расходов',{exact:true}).selectOption({label:'Точно'});
   await page.getByLabel('Оплата',{exact:true}).selectOption({label:'Частично'});
   await page.getByRole('button',{name:'Сохранить суммы'}).click();
   await page.getByText('Частично',{exact:true}).waitFor();
@@ -95,6 +130,12 @@ test('Упакованный интерфейс офлайн, переходы, 
   await page.getByRole('button',{name:'Сохранить изменения'}).click();
   await page.getByRole('heading',{name:'Кухня'}).waitFor();
   assert.equal(page.url(),projectUrl);
+  await page.getByRole('link',{name:'Внести суммы'}).click();
+  assert.equal(await page.getByLabel('Точность расходов',{exact:true}).inputValue(),'exact');
+  assert.equal(await page.getByLabel('Оплата',{exact:true}).inputValue(),'Частично');
+  assert.equal(await page.getByLabel('Получено всего, ₽').inputValue(),'25000');
+  assert.equal(await page.getByLabel('Прямые расходы, ₽').inputValue(),'2500');
+  await page.goBack();
   await page.getByRole('link',{name:'Открыть связанный расчёт'}).click();
   await page.waitForURL('**/calculator.html#order/legacy-7');
   await page.getByRole('link',{name:'Моя мастерская'}).click();
