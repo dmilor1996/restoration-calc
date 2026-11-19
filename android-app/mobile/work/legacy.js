@@ -11,12 +11,12 @@ export function availableOrders() {
     try {
       const calc=calcTotals(draft,settings);
       area=calc.area.total;
-      materials=usedMaterials(draft,settings.cost,finish).filter(m=>m && m.volume>0).map(m=>({
+      materials=area>0 ? usedMaterials(draft,settings.cost,finish).filter(m=>m && m.volume>0).map(m=>({
         id:'calc-'+m.id, name:m.name || 'Материал', kind:m.kind, unit:'мл',
         quantity:Math.round(area*materialMlPerM2(m)*100)/100,
         unitPriceRub:Number(m.price)/(Number(m.volume)*1000),
         source:'estimate'
-      }));
+      })) : [];
     } catch { /* A legacy calculation can be incomplete. Linking must remain available. */ }
     const price=o.totals?.[finish];
     const label=draft.client?.name || draft.client?.address || 'Расчёт '+o.id;
