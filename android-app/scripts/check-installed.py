@@ -15,7 +15,7 @@ def bounds(node):
     return list(map(int, re.findall(r"-?\d+", node.get("bounds", ""))))
 
 
-def find(label, tap=False, scroll=False):
+def find(label, tap=False, scroll=False, select=False):
     deadline = time.monotonic() + 45
     labels = []
     while time.monotonic() < deadline:
@@ -37,6 +37,15 @@ def find(label, tap=False, scroll=False):
             dock_top = bounds(dock)[1] if dock is not None else 0
             if dock_top < height // 2:
                 dock_top = height * 85 // 100
+            if select:
+                # WebView exposes the caption and the select under the same
+                # accessible name. Prefer the native spinner, then the lowest
+                # matching node (the actual field beneath its caption).
+                matches = [node for node in nodes if label in (node.get("text"), node.get("content-desc"))]
+                nodes = sorted(matches, key=lambda node: (
+                    node.get("class") == "android.widget.Spinner",
+                    bounds(node)[1],
+                ), reverse=True)
             for node in nodes:
                 names = [node.get("text", ""), node.get("content-desc", "")]
                 labels.extend(filter(None, names))
@@ -70,7 +79,7 @@ launch()
 find("Объекты", tap=True)
 find("Создать объект", tap=True)
 find("Новый объект")
-find("Тип работы", tap=True)
+find("Тип работы", tap=True, select=True)
 find("Лестница", tap=True)
 find("Создать объект", tap=True)
 find("Начать работу", tap=True)
