@@ -106,3 +106,4 @@ progress::-webkit-progress-value {background:var(--active);border-radius:6px}
   .row,.hero,.action {transition:transform .14s ease-out}
   .row:active,.hero:active,.action:active {transform:scale(.992)}
 }
+.hero-image img {height:auto;aspect-ratio:2 / 1}
