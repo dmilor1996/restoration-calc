@@ -1,5 +1,7 @@
 """Exercise the APK installed on the CI emulator, including Android's back dispatcher."""
+import os
 import re
+import sys
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -7,8 +9,19 @@ import xml.etree.ElementTree as ET
 PACKAGE = "com.restoration.calc"
 
 
+ADB = os.environ.get("WORKSHOP_ADB", "adb")
+SERIAL = os.environ.get("ANDROID_SERIAL") or subprocess.check_output([ADB, "get-serialno"], text=True).strip()
+if not re.fullmatch(r"emulator-\d+", SERIAL):
+    sys.exit("An explicitly selected emulator is required.")
+
+
 def adb(*args):
-    return subprocess.check_output(["adb", *args], text=True, timeout=18).strip()
+    return subprocess.check_output([ADB, "-s", SERIAL, *args], encoding="utf-8", timeout=30).strip()
+
+
+avd = adb("emu", "avd", "name").splitlines()[0].strip()
+if avd != "Workshop_QA_API34" and os.environ.get("GITHUB_ACTIONS") != "true":
+    sys.exit("Use the dedicated Workshop_QA_API34 emulator.")
 
 
 def bounds(node):
@@ -49,13 +62,13 @@ def find(label, tap=False, scroll=False, select=False):
             for node in nodes:
                 names = [node.get("text", ""), node.get("content-desc", "")]
                 labels.extend(filter(None, names))
-                if label not in names:
+                if label not in names and label != node.get("class"):
                     continue
                 if tap:
                     x1, y1, x2, y2 = bounds(node)
                     # WebView accessibility also exposes controls covered by the fixed dock.
                     # Tap only their visible area, then scroll and inspect a fresh tree if needed.
-                    in_dock = label in {"Сегодня", "Объекты", "Мастерская", "Прогресс", "Калькулятор"}
+                    in_dock = label in {"Главная", "Заказы", "Мастерская", "Прогресс", "Калькулятор"}
                     y2 = min(y2, height if in_dock else dock_top - 4)
                     if x2 <= x1 or y2 - y1 < 6:
                         continue
@@ -74,30 +87,42 @@ def launch():
 
 
 width, height = map(int, re.findall(r"(\d+)x(\d+)", adb("shell", "wm", "size"))[-1])
-adb("shell", "cmd", "connectivity", "airplane-mode", "enable")
-launch()
-find("Объекты", tap=True)
-find("Создать объект", tap=True)
-find("Новый объект")
-find("Тип работы", tap=True, select=True)
-find("Лестница", tap=True)
-find("Создать объект", tap=True)
-find("Начать работу", tap=True)
-find("Пауза", tap=True)
-find("Продолжить этап")
-adb("shell", "am", "force-stop", PACKAGE)
-launch()
-find("Лестница", tap=True)
-find("Продолжить этап", tap=True)
-find("Завершить выезд", tap=True, scroll=True)
-find("Начать новый выезд", tap=True)
-find("Пауза")
-adb("shell", "am", "force-stop", PACKAGE)
-launch()
-find("Лестница", tap=True)
-find("Пауза")
-find("Калькулятор", tap=True)
-find("Заказы")
-adb("shell", "input", "keyevent", "KEYCODE_BACK")
-find("Пауза")
-print("Offline create, pause, process death, resume, second visit, calculator and native Back passed.")
+title = "QA" + str(time.time_ns())
+airplane = adb("shell", "settings", "get", "global", "airplane_mode_on")
+try:
+    adb("shell", "cmd", "connectivity", "airplane-mode", "enable")
+    launch()
+    find("Заказы", tap=True)
+    find("Новый заказ", tap=True)
+    find("android.widget.EditText", tap=True)
+    adb("shell", "input", "text", title)
+    if "mInputShown=true" in adb("shell", "dumpsys", "input_method"):
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    find("Клиент и детали заказа (необязательно)", tap=True, scroll=True)
+    find("Категория для поиска и статистики", tap=True, select=True, scroll=True)
+    find("Лестница", tap=True)
+    find("Создать заказ", tap=True, scroll=True)
+    find("Начать работу", tap=True, scroll=True)
+    find("Пауза", tap=True)
+    find("Продолжить этап")
+    adb("shell", "am", "force-stop", PACKAGE)
+    launch()
+    find(title, tap=True)
+    find("Продолжить этап", tap=True)
+    find("Завершить работу на сегодня", tap=True, scroll=True)
+    find("Начать следующий рабочий день", tap=True, scroll=True)
+    find("Пауза")
+    adb("shell", "am", "force-stop", PACKAGE)
+    launch()
+    find(title, tap=True)
+    find("Пауза")
+    find("Калькулятор", tap=True)
+    find("Известная площадь")
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    find("Пауза")
+    find("Завершить работу на сегодня", tap=True, scroll=True)
+    find("Начать следующий рабочий день")
+    print("Offline category selection, two days, process death and native Back passed.")
+finally:
+    if airplane == "0":
+        adb("shell", "cmd", "connectivity", "airplane-mode", "disable")

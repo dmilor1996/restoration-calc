@@ -35,7 +35,7 @@ export function ProjectForm({p,projects,run}) {
     <p class="hint">Для начала достаточно названия. Расчёт, клиент и детали необязательны.</p>
     <form class="editor" onSubmit=${submit}>
       <${Field} label="Название или краткое описание">
-        <input name="title" maxlength="200" defaultValue=${p?.title==='Новый заказ'?'':p?.title||''}
+        <input data-testid="order-title" name="title" maxlength="200" defaultValue=${p?.title==='Новый заказ'?'':p?.title||''}
           placeholder="Например: дубовая столешница" autocomplete="off"/><//>
       <${Field} label="Где выполняется работа">
         <select value=${workplace} onChange=${e=>setWorkplace(e.target.value)}>
@@ -59,12 +59,12 @@ export function ProjectForm({p,projects,run}) {
         <${Field} label="Плановая дата"><input name="scheduled" type="date" defaultValue=${p?.scheduled||''}/><//>
         <${Field} label="Заметки"><textarea name="note" defaultValue=${p?.note||''}/><//>
         <${Field} label="Категория для поиска и статистики">
-          <select value=${type} onChange=${e=>setType(e.target.value)}>
+          <select data-testid="order-category" value=${type} onChange=${e=>setType(e.target.value)}>
             ${types.map(t=>html`<option key=${t} value=${t}>${t}</option>`)}
           </select><//>
         <p class="hint">Категория не ограничивает этапы работы. Любой этап можно выбрать позже во время заказа.</p>
       </details>
-      <button class="primary">${p?'Сохранить заказ':'Создать заказ'}</button>
+      <button data-testid="order-submit" class="primary">${p?'Сохранить заказ':'Создать заказ'}</button>
     </form>`;
 }
 
