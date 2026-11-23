@@ -32,13 +32,15 @@ export function MixCalc({projects=[],projectId}){
  const [rows,setRows]=useState([blankRow()]),[source,setSource]=useState(projectId && projects.some(p=>p.id===projectId && (p.legacy?.area>0||p.legacy?.geometry?.length||p.legacy?.id))?'p:'+projectId:'manual'),[excluded,setExcluded]=useState([]);
  const [area,setArea]=useState(''),[layers,setLayers]=useState('1'),[reserve,setReserve]=useState('0');
  const [amount,setAmount]=useState(''),[unit,setUnit]=useState(recipes[0]?.basis||'g'),[anchor,setAnchor]=useState('total');
+ const [rounding,setRounding]=useState(()=>{try{const saved=localStorage.getItem('workshop.mix.rounding.v1');return ['none','nearest','up'].includes(saved)?saved:'up';}catch{return 'up';}});
+ function changeRounding(value){setRounding(value);try{localStorage.setItem('workshop.mix.rounding.v1',value);}catch{}}
  const recipe=recipes.find(r=>r.id===recipeId);
  const orders=loadOrders().filter(o=>o&&!o.deleted&&o.id);
  const sources=[...projects.filter(p=>p.legacy?.area>0||p.legacy?.geometry?.length||orders.some(o=>o.id===p.legacy?.id)).map(p=>({id:'p:'+p.id,name:p.title,rows:p.legacy?.geometry?.length?p.legacy.geometry:geometryRows(orders.find(o=>o.id===p.legacy?.id)?.draft),area:p.legacy?.area})),...orders.map(o=>({id:'o:'+o.id,name:o.draft?.client?.name||o.draft?.client?.address||'Расчёт '+o.id,rows:geometryRows(o.draft)}))];
  const selected=sources.find(s=>s.id===source);
  const totalArea=source==='manual'?rows.reduce((s,r)=>s+rowArea(r),0):source==='area'?number(area):selected?.rows.length?selected.rows.reduce((s,r,i)=>s+(excluded.includes(i)?0:rowArea(r)),0):selected?.area||0;
  const patch=(i,k,v)=>setRows(rs=>rs.map((r,j)=>i===j?{...r,[k]:v}:r));
- let result=null,error='';if(recipe)try{result=mix(recipe,{area:totalArea,layers,reserve,amount,amountUnit:unit,anchor});}catch(e){error=e.message;}
+ let result=null,error='';if(recipe)try{result=mix(recipe,{area:totalArea,layers,reserve,amount,amountUnit:unit,anchor,rounding});}catch(e){error=e.message;}
  return html`<a class="back" href=${projectId?'#projects/'+projectId:'#calculator'}>← Назад</a><h1>Калькулятор замеса</h1><p class="hint">Расчёт не списывает материалы и не изменяет заказ.</p>
  <a class="secondary full" href="#shop/recipes">Справочник материалов</a>
  ${!recipes.length?html`<p>Добавьте первый материал и его рецепт в справочник.</p>`:html`<div class="editor">
@@ -52,5 +54,8 @@ export function MixCalc({projects=[],projectId}){
  <p><strong>Площадь: ${fmt(totalArea)} м²</strong></p><div class="pair">${field('Слоёв в замесе',layers,setLayers,true)}${field('Запас, %',reserve,setReserve,true)}</div>`:html`
  ${select('Что известно',anchor,setAnchor,[['total','Количество всей смеси'],...(recipe?.parts||[]).map((p,i)=>[String(i),p.name])])}
  <div class="pair">${field('Количество',amount,setAmount,true)}${select('Единица',unit,setUnit,units)}</div>`}
- ${result?html`<div class="panel" aria-live="polite"><h2>Готовый замес</h2><p><strong>Всего: ${fmt(result.g)} г / ${fmt(result.ml)} мл</strong></p>${result.rows.map((r,i)=>html`<p key=${i}>${r.name}: <strong>${fmt(r.g)} г / ${fmt(r.ml)} мл</strong></p>`)}${(result.g===null||result.ml===null)&&html`<p class="hint">— нет плотности для пересчёта.</p>`}</div>`:html`<p class="hint" aria-live="polite">${error}</p>`}</div>`}`;
+ ${select('Округление компонентов',rounding,changeRounding,[['none','Без округления'],['nearest','До ближайших целых'],['up','До целых вверх']])}
+ <p class="hint">Округление до целых ${recipe?.basis==='g'?'граммов':'миллилитров'} сохраняет пропорции компонентов. При пересчёте в другую единицу могут остаться дроби.</p>
+ ${result?html`<div class="panel" aria-live="polite"><h2>Готовый замес</h2>
+ ${rounding!=='none'&&Math.abs(result.roundedTotal-result.exactTotal)>1e-8&&html`<p class="hint">До округления: ${fmt(result.exactTotal)} ${recipe.basis==='g'?'г':'мл'} · ${result.roundedTotal>=result.exactTotal?'+':'−'}${fmt(Math.abs(result.roundedTotal-result.exactTotal))} ${recipe.basis==='g'?'г':'мл'}. ${result.roundedTotal<result.exactTotal?'Меньше расчётного количества.':result.roundedTotal>result.exactTotal*1.2?'Значительный запас из-за пропорций.':''} ${recipe.mode==='manual'&&anchor!=='total'?'Введённое количество компонента также изменено.':''}</p>`}<p><strong>Всего: ${fmt(result.g)} г / ${fmt(result.ml)} мл</strong></p>${result.rows.map((r,i)=>html`<p key=${i}>${r.name}: <strong>${fmt(r.g)} г / ${fmt(r.ml)} мл</strong></p>`)}${(result.g===null||result.ml===null)&&html`<p class="hint">— нет плотности для пересчёта.</p>`}</div>`:html`<p class="hint" aria-live="polite">${error}</p>`}</div>`}`;
 }

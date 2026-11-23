@@ -17,7 +17,22 @@ export function validateRecipe(r) {
     Array.isArray(r.parts)&&r.parts.length>=1&&r.parts.length<=3&&r.parts.every(p=>p.name?.trim()&&positive(p.ratio)&&(!String(p.density??'').trim()||positive(p.density))) &&
     (r.mode==='manual'||r.rateUnit===r.basis||r.parts.every(p=>positive(p.density))));
 }
-export function mix(r,{area=0,layers=1,reserve=0,amount=0,amountUnit=r.basis,anchor='total'}={}) {
+// Reduce the decimal ratio to the smallest whole-unit batch (e.g. 1.5:0.5 -> 3:1).
+function wholeBatch(parts) {
+  const decimals=parts.map(p=>{
+    const [mantissa,exp='0']=String(number(p.ratio)).split('e');
+    const [whole,fraction='']=mantissa.split('.');
+    return {digits:BigInt(whole+fraction),scale:fraction.length-Number(exp)};
+  });
+  const scale=Math.max(...decimals.map(p=>p.scale));
+  const ints=decimals.map(p=>p.digits*10n**BigInt(scale-p.scale));
+  const gcd=(a,b)=>b===0n?a:gcd(b,a%b);
+  const divisor=ints.reduce(gcd);
+  const batch=ints.map(n=>Number(n/divisor));
+  if(!batch.every(Number.isSafeInteger)||!Number.isSafeInteger(batch.reduce((s,n)=>s+n,0))) throw Error('Пропорция слишком точная для целых компонентов. Выберите расчёт без округления.');
+  return batch;
+}
+export function mix(r,{area=0,layers=1,reserve=0,amount=0,amountUnit=r.basis,anchor='total',rounding='none'}={}) {
   if(!validateRecipe(r)) throw Error('Проверьте рецепт.');
   const parts=r.parts, sum=parts.reduce((s,p)=>s+number(p.ratio),0);
   const factors=parts.map(p=>number(p.ratio)/sum);
@@ -42,8 +57,21 @@ export function mix(r,{area=0,layers=1,reserve=0,amount=0,amountUnit=r.basis,anc
     }
   }
   if(!positive(total)) throw Error('Проверьте исходные данные.');
-  const rows=parts.map((p,i)=>({name:p.name,g:convert(total*factors[i],r.basis,'g',p),ml:convert(total*factors[i],r.basis,'ml',p)}));
-  return {rows,g:rows.every(p=>p.g!==null)?rows.reduce((s,p)=>s+p.g,0):null,ml:rows.every(p=>p.ml!==null)?rows.reduce((s,p)=>s+p.ml,0):null};
+  const exactTotal=total;
+  let quantities=parts.map((p,i)=>total*factors[i]);
+  if(rounding==='up'||rounding==='nearest'){
+    const batch=wholeBatch(parts);
+    const step=batch.reduce((s,n)=>s+n,0);
+    const raw=total/step;
+    // Avoid an additional batch due only to floating-point noise.
+    const stable=Math.abs(raw-Math.round(raw))<=Math.max(1,raw)*Number.EPSILON*8?Math.round(raw):raw;
+    const count=Math.max(1,rounding==='up'?Math.ceil(stable):Math.round(stable));
+    quantities=batch.map(n=>n*count);
+    total=quantities.reduce((s,n)=>s+n,0);
+    if(!quantities.every(Number.isSafeInteger)||!Number.isSafeInteger(total)) throw Error('Слишком большой замес для округления.');
+  }
+  const rows=parts.map((p,i)=>({name:p.name,g:convert(quantities[i],r.basis,'g',p),ml:convert(quantities[i],r.basis,'ml',p)}));
+  return {rows,g:rows.every(p=>p.g!==null)?rows.reduce((s,p)=>s+p.g,0):null,ml:rows.every(p=>p.ml!==null)?rows.reduce((s,p)=>s+p.ml,0):null,exactTotal,roundedTotal:total};
 }
 const KEY='workshop.recipes.v1';
 export function loadRecipes(){try {const list=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(list)?list.filter(validateRecipe):[];}catch{return [];}}

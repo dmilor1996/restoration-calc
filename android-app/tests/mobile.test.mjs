@@ -219,3 +219,20 @@ test('Material recipes, area from order, manual mix and persistence',async t=>{
   await page.getByText('Всего: 130 г / — мл').waitFor();
   assert.deepEqual(errors,[]);
 });
+
+test('Whole component rounding selector, exact ratio and persistence',async t=>{
+ const {page,origin,errors}=await openWorkshop(t);
+ await page.evaluate(()=>localStorage.setItem('workshop.recipes.v1',JSON.stringify([{id:'oil',name:'Oil',mode:'area',basis:'ml',rateUnit:'ml',rate:50,parts:[{name:'Oil',ratio:3},{name:'Hardener',ratio:1}]}])));
+ await page.goto(origin+'/#calculator/mix');
+ await page.getByLabel('Источник площади').selectOption('area');
+ await page.getByLabel('Площадь, м²').fill('1');
+ await page.getByText('Всего: — г / 52 мл').waitFor();
+ await page.getByText('— г / 39 мл',{exact:true}).waitFor();
+ await page.getByText('— г / 13 мл',{exact:true}).waitFor();
+ await page.getByLabel('Округление компонентов').selectOption('none');
+ await page.getByText('Всего: — г / 50 мл').waitFor();
+ await page.getByText('— г / 37,5 мл',{exact:true}).waitFor();
+ await page.reload();
+ assert.equal(await page.getByLabel('Округление компонентов').inputValue(),'none');
+ assert.deepEqual(errors,[]);
+});
