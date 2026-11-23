@@ -42,7 +42,7 @@ $sdk = "$env:LOCALAPPDATA\Android\Sdk"
 .\dev.ps1 install
 .\dev.ps1 start
 .\dev.ps1 ui tree
-.\dev.ps1 ui tap 'a[href="#projects"]'
+.\dev.ps1 ui tap 'nav a[href="#projects"]'
 .\dev.ps1 ui tap 'a[href="#projects/new"]'
 .\dev.ps1 ui text '[data-testid=order-title]' 'Тестовая столешница'
 .\dev.ps1 ui scroll '[data-testid=order-submit]'

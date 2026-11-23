@@ -1,5 +1,6 @@
 """Windows development commands for the workshop. Python 3.9+, standard library."""
 import argparse
+import base64
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -276,7 +277,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=list(commands))
     parser.add_argument("args", nargs="*")
-    args = parser.parse_args()
+    argv = sys.argv[1:]
+    if len(argv) == 2 and argv[0] == "--powershell-args":
+        argv = json.loads(base64.b64decode(argv[1]).decode("utf-8"))
+    args = parser.parse_args(argv)
     if args.args and args.command != "ui":
         parser.error("Only ui accepts extra arguments.")
     if args.command in {"verify", "deps", "test", "quality", "build"}:
