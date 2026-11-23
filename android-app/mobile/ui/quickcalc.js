@@ -3,6 +3,7 @@ import { calcTotals, materialMlPerM2, renderTemplate, templateVars, usedMaterial
 import { defaultDraft, newItem } from '../js/defaults.js';
 import { loadSettings } from '../js/store.js';
 import { template, uuid } from '../work/model.js';
+import { geometryRows } from '../work/mix.js';
 
 const parse = value => {
   const n=Number(String(value||'').trim().replace(',','.'));
@@ -49,14 +50,14 @@ export function QuickCalc({run,notify}) {
     if(totals.area.total<=0)return notify('Укажите размеры или площадь.');
     const id=uuid(),price=Math.round(total*100);
     const legacy={id:'quick-'+uuid(),source:'quick',label:'Быстрый расчёт',price,
-      area:Math.round(totals.area.total*1000)/1000,materials:costMaterials,
+      area:Math.round(totals.area.total*1000)/1000,geometry:geometryRows(draft),materials:costMaterials,
       currency:settings.currency||'₽'};
     const name=client.trim() || (mode==='stairs'?'Лестница':'Реставрация поверхности');
     run({id,rev:0},{kind:'details',title:name,type:mode==='stairs'?'Лестница':'Другая работа',
       workplace:'client',address:'',client:client.trim(),scheduled:'',note:'',
       legacy,stages:template()},'#projects/'+id);
   }
-  return html`<p class="dateline">Расчёт за несколько действий</p><h1>Калькулятор</h1>
+  return html`<p class="dateline">Расчёт за несколько действий</p><h1>Калькулятор</h1><a class="primary" href="#calculator/mix">Калькулятор замеса материалов</a>
     <p class="hint">Для типовой работы нужны только размеры. Все тарифы взяты из существующего калькулятора.</p>
     <div class="editor">
       <div class="filters"><button aria-pressed=${mode==='surfaces'} onClick=${()=>setMode('surfaces')}>Поверхность</button>

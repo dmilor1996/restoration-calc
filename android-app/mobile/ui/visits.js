@@ -108,6 +108,7 @@ export function Project({p,projects,run}) {
       ...(plan != null && ['₽','RUB','руб.','руб'].includes(p.legacy.currency) && p.received !== null ? [['Отклонение от плана',money(p.received-plan)]] : [])]}/></div>
     ${totals.tinySession && html`<p class="hint">Учтено менее 15 минут работы. Почасовой показатель может быть очень высоким и не отражать обычную доходность.</p>`}
     ${costs.estimated && !costs.historical && html`<p class="hint">Расходы рассчитаны предварительно по нормативам. Уточни реальный расход материалов.</p>`}
+    <a class="secondary full spaced" href=${path+'/mix'}>Рассчитать замес материалов</a>
     <a class="secondary full spaced" href=${path+'/materials'}>Расход лака, масла и абразивных дисков</a>
     ${(p.address || p.client || p.note || p.scheduled || p.legacy) && html`<${SectionTitle} title="Детали заказа"/><div class="panel">
       <${Facts} rows=${[['Клиент',p.client],['Адрес',p.address],['Плановая дата',p.scheduled],['Заметки',p.note],

@@ -1,5 +1,6 @@
 // The calculator owns its saved orders. A link keeps a cost/area snapshot for offline order work.
 import { loadOrders, loadSettings } from '../js/store.js';
+import { geometryRows } from './mix.js';
 import { calcTotals, materialMlPerM2, usedMaterials } from '../js/calc.js';
 
 export function availableOrders() {
@@ -21,7 +22,7 @@ export function availableOrders() {
     const price=o.totals?.[finish];
     const label=draft.client?.name || draft.client?.address || 'Расчёт '+o.id;
     return {id:o.id,label,price:Number.isFinite(price) && price>=0?Math.round(price*100):null,
-      area:Number.isFinite(area)?Math.round(area*1000)/1000:0,materials,
+      area:Number.isFinite(area)?Math.round(area*1000)/1000:0,geometry:geometryRows(draft),materials,
       currency:settings.currency || '₽'};
   });
 }

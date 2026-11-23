@@ -7,6 +7,7 @@ import { Today, Projects, Progress } from './overview.js';
 import { Project } from './visits.js';
 import { Backup, FinanceForm, MaterialsForm, ProjectForm, VisitForm } from './forms.js';
 import { QuickCalc } from './quickcalc.js';
+import { MixCalc, RecipeList } from './mix.js';
 import { importMissing, listProjects, onExternalChange, saveCommand } from '../work/store.js';
 
 function screen(hash,props) {
@@ -22,10 +23,13 @@ function screen(hash,props) {
       if (action === 'edit') return [section,p.title,html`<${ProjectForm} p=${p} ...${props}/>`];
       if (action === 'manual' || (action === 'time' && v)) return [section,p.title,html`<${VisitForm} p=${p} v=${v} ...${props}/>`];
       if (action === 'finance' || action === 'finish') return [section,p.title,html`<${FinanceForm} p=${p} finish=${action==='finish'} ...${props}/>`];
+      if (action === 'mix') return [section,p.title,html`<${MixCalc} ...${props} projectId=${p.id}/>`];
       if (action === 'materials') return [section,p.title,html`<${MaterialsForm} p=${p} ...${props}/>`];
       return [section,p.title,html`<${Project} p=${p} ...${props}/>`];
     }
   }
+  if (section === 'calculator' && id === 'mix') return [section,'Калькулятор замеса',html`<${MixCalc} ...${props}/>`];
+  if (section === 'shop' && id === 'recipes') return [section,'Материалы',html`<${RecipeList}/>`];
   if (section === 'calculator') return ['calculator','Калькулятор',html`<${QuickCalc} ...${props}/>`];
   const item=section==='shop' && inventory.find(x=>x.id===id);
   if (item) return [section,item.title,html`<${StockItem} item=${item}/>`];

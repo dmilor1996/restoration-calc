@@ -5,7 +5,7 @@ import { Icon } from './icons.js';
 
 export function Workshop() {
   const [filter,setFilter] = useState('Все');
-  return html`<h1>Мастерская</h1><${Filters} options=${['Все','Инструмент','Расходники'].map(v => [v,v])} value=${filter} onChange=${setFilter}/>
+  return html`<h1>Мастерская</h1><a class="primary" href="#shop/recipes">Материалы для замеса</a><p class="hint">Инструменты и остатки ниже — демонстрационные.</p><${Filters} options=${['Все','Инструмент','Расходники'].map(v => [v,v])} value=${filter} onChange=${setFilter}/>
     <div class="rows">${inventory.filter(t => filter === 'Все' || t.group === filter).map(t => html`
       <a key=${t.id} class="row" href=${'#shop/' + t.id}><span class="tile"><${Icon} name=${t.mark} size=${32}/></span>
       <div class="row-text"><small>${t.kind}</small><strong>${t.title}</strong><small>${t.amount}</small></div><${Icon} name="next" size=${16}/></a>`)}</div>`;
