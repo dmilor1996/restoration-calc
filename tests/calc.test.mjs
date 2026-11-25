@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  num, itemGeometry, faceArea, shapeSides, shapeOutline, polyArea, setSideLength, measurePolySide, measuredSideError, clearPolyMeasurements,
+  num, itemGeometry, faceArea, shapeSides, shapeOutline, polyArea, setSideLength, measurePolySide, measuredSideError, clearPolyMeasurements, setPolyMeasurement, fitMeasuredPolygon,
   calcTotals, calcCost, materialCostPerM2, factSummary, aggregateStats, sandHours, upsertRecent, roundDir, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
 } from '../js/calc.js';
 import { defaultSettings, defaultDraft, newItem, normalizeDraft, normalizeSettings, DEFAULT_TEMPLATES } from '../js/defaults.js';
@@ -442,4 +442,25 @@ test('manual polygon measurements persist and drive edge area', () => {
   const impossible=[100,100,100,500].reduce((p,l,i)=>measurePolySide(p,i,l),sketch);
   assert.deepEqual(impossible.map(p=>p.m),[100,100,100,500]);
   assert.ok(measuredSideError(impossible)>2);
+});
+
+
+test('winder measurements are independent of input order and partial typing', () => {
+  const original = [{x:0,y:415,e:true},{x:0,y:0,e:true},{x:985,y:0,e:true},{x:985,y:110,e:true}];
+  const values=[415,985,110,945];
+  let sketch=original;
+  for(const i of [0,1,2,3]) {
+    for(const value of ['','1',String(values[i])]) sketch=setPolyMeasurement(sketch,i,value);
+    assert.deepEqual(sketch.slice(0,i+1).map(p=>p.m),values.slice(0,i+1));
+    assert.deepEqual(sketch.map(({x,y})=>({x,y})),original.map(({x,y})=>({x,y})));
+  }
+  const pts=fitMeasuredPolygon(sketch);
+  const reverse=fitMeasuredPolygon([3,2,1,0].reduce((ps,i)=>setPolyMeasurement(ps,i,values[i]),original));
+  assert.deepEqual(pts,reverse);
+  const it=item('poly',{pts,thickness:40});
+  assert.deepEqual(shapeSides(it).map(s=>s.len),values);
+  near(itemGeometry(it).edgeLen,2455);
+  assert.ok(measuredSideError(pts)<0.2);
+  assert.ok(faceArea(it)>0.22 && faceArea(it)<0.28);
+  assert.deepEqual(setPolyMeasurement(sketch,1,'').map(p=>p.m),[415,undefined,110,945]);
 });
