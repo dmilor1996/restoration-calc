@@ -236,3 +236,28 @@ test('Whole component rounding selector, exact ratio and persistence',async t=>{
  assert.equal(await page.getByLabel('Округление компонентов').inputValue(),'none');
  assert.deepEqual(errors,[]);
 });
+
+
+test('Забежная ступень: посимвольные замеры, сохранение без blur, повторное открытие',async t=>{
+  const {page,origin,errors}=await openWorkshop(t);
+  await page.goto(origin+'/calculator.html#calc');
+  await page.locator('.item').first().getByRole('radio',{name:'Своя форма'}).click();
+  const dialog=page.getByRole('dialog',{name:'Своя форма'});
+  await dialog.getByRole('button',{name:'Забежная ступень',exact:true}).click();
+  const values=['415','985','110','945'];
+  for(let i=0;i<values.length;i++){
+    const input=dialog.getByTestId('poly-side-'+i);
+    assert.equal(await input.inputValue(),'');
+    await input.pressSequentially(values[i]);
+    for(let j=0;j<=i;j++)assert.equal(await dialog.getByTestId('poly-side-'+j).inputValue(),values[j]);
+  }
+  await dialog.getByRole('button',{name:'Готово',exact:true}).click();
+  await page.locator('.item').first().getByRole('button',{name:'Изменить форму'}).click();
+  for(let i=0;i<4;i++)assert.equal(await dialog.getByTestId('poly-side-'+i).inputValue(),values[i]);
+  await dialog.getByTestId('poly-side-3').fill('946');
+  assert.equal(await dialog.getByTestId('poly-side-0').inputValue(),'415');
+  await dialog.getByRole('button',{name:'Готово',exact:true}).click();
+  await page.locator('.item').first().getByRole('button',{name:'Изменить форму'}).click();
+  assert.equal(await dialog.getByTestId('poly-side-3').inputValue(),'946');
+  assert.deepEqual(errors,[]);
+});
