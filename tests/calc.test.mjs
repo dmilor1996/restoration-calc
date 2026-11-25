@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  num, itemGeometry, faceArea, shapeSides, shapeOutline, polyArea, setSideLength,
+  num, itemGeometry, faceArea, shapeSides, shapeOutline, polyArea, setSideLength, measurePolySide, measuredSideError, clearPolyMeasurements,
   calcTotals, calcCost, materialCostPerM2, factSummary, aggregateStats, sandHours, upsertRecent, roundDir, pickTier, tierLabel, roundTo, renderTemplate, templateVars, usedKeys, plural,
 } from '../js/calc.js';
 import { defaultSettings, defaultDraft, newItem, normalizeDraft, normalizeSettings, DEFAULT_TEMPLATES } from '../js/defaults.js';
@@ -421,4 +421,25 @@ test('последние расчёты: обновление по rid и не �
   list = upsertRecent(list, { rid: 'r5', updatedAt: 100, extra: true });
   assert.equal(list.length, 10); assert.equal(list[0].rid, 'r5'); assert.ok(list[0].extra);
   assert.equal(list.filter((e) => e.rid === 'r5').length, 1);
+});
+
+
+test('manual polygon measurements persist and drive edge area', () => {
+  const sketch = [{x:0,y:260,e:true},{x:0,y:0,e:true},{x:930,y:0,e:true},{x:930,y:110,e:true}];
+  const lengths = [260,932,110,945];
+  const pts = lengths.reduce((p,l,i)=>measurePolySide(p,i,l),sketch);
+  const it = item('poly',{pts,thickness:40});
+  assert.deepEqual(shapeSides(it).map(s=>s.len),lengths);
+  assert.ok(measuredSideError(pts)<0.1);
+  near(itemGeometry(it).edgeLen,2247);
+  near(faceArea(it),0.17242,0.005);
+  const reopened = JSON.parse(JSON.stringify(it));
+  assert.deepEqual(shapeSides(reopened).map(s=>s.len),lengths);
+  const changed=measurePolySide(reopened.pts,3,950);
+  assert.deepEqual(changed.map(p=>p.m),[260,932,110,950]);
+  assert.equal(clearPolyMeasurements(changed,[0])[0].m,undefined);
+  assert.equal(clearPolyMeasurements(changed,[0])[1].m,932);
+  const impossible=[100,100,100,500].reduce((p,l,i)=>measurePolySide(p,i,l),sketch);
+  assert.deepEqual(impossible.map(p=>p.m),[100,100,100,500]);
+  assert.ok(measuredSideError(impossible)>2);
 });
