@@ -1,7 +1,7 @@
 // Схема фигуры с нажимаемыми гранями и редактор «Своя форма» (рисование контура).
 
-import { html, useState, useEffect, useRef } from './vendor/preact-htm.js';
-import { num, shapeOutline, shapeSides, faceArea, polyArea, measuredSideLength, measuredSideError, measurePolySide, clearPolyMeasurements, fmtInt, fmtArea, fmtNum } from './calc.js';
+import { html, useState, useEffect, useRef, useMemo } from './vendor/preact-htm.js';
+import { num, shapeOutline, shapeSides, faceArea, polyArea, measuredSideLength, measuredSideError, fitMeasuredPolygon, setPolyMeasurement, clearPolyMeasurements, fmtInt, fmtArea, fmtNum } from './calc.js?v=9';
 import { Icon, cleanNum } from './ui.js';
 
 const GHOST = {
@@ -90,6 +90,7 @@ export function Diagram({ item, onToggle }) {
 const EW = 640, EH = 460, EP = 64;
 
 const PRESETS = [
+  { label: 'Забежная ступень', pts: [[0, 415], [0, 0], [985, 0], [985, 110]] },
   { label: 'Г-образная', pts: [[0, 0], [2400, 0], [2400, 600], [600, 600], [600, 1800], [0, 1800]] },
   { label: 'П-образная', pts: [[0, 0], [3000, 0], [3000, 1800], [2400, 1800], [2400, 600], [600, 600], [600, 1800], [0, 1800]] },
   { label: 'Со срезом', pts: [[0, 0], [1700, 0], [2000, 300], [2000, 800], [0, 800]] },
@@ -110,13 +111,11 @@ const toS = (v, p) => [v.ox + p.x * v.s, v.oy + p.y * v.s];
 const toW = (v, x, y) => ({ x: (x - v.ox) / v.s, y: (y - v.oy) / v.s });
 
 /** Поле, которое применяет значение по Enter или при выходе из него. */
-function CommitNum({ value, onCommit, suffix, label, aria, measure = false }) {
+function CommitNum({ value, onCommit, suffix, label, aria }) {
   const [text, setText] = useState(null);
-  const dirty = useRef(false);
   const shown = text ?? String(Math.round(value));
   const commit = () => {
-    if (text !== null && text !== '' && (num(text) !== Math.round(value) || (measure && dirty.current))) onCommit(num(text));
-    dirty.current = false;
+    if (text !== null && text !== '' && num(text) !== Math.round(value)) onCommit(num(text));
     setText(null);
   };
   return html`
@@ -125,7 +124,7 @@ function CommitNum({ value, onCommit, suffix, label, aria, measure = false }) {
       <span class="field__box">
         <input type="text" inputmode="numeric" autocomplete="off" enterkeyhint="done" value=${shown} aria-label=${aria || label}
           onFocus=${(e) => { setText(String(Math.round(value))); const el = e.target; requestAnimationFrame(() => el.select()); }}
-          onInput=${(e) => { dirty.current = true; const v = cleanNum(e.target.value); if (v !== e.target.value) e.target.value = v; setText(v); }}
+          onInput=${(e) => { const v = cleanNum(e.target.value); if (v !== e.target.value) e.target.value = v; setText(v); }}
           onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
           onBlur=${commit} />
         ${suffix ? html`<span class="field__suffix">${suffix}</span>` : null}
@@ -134,7 +133,8 @@ function CommitNum({ value, onCommit, suffix, label, aria, measure = false }) {
 }
 
 export function PolyEditor({ item, title, onSave, onClose }) {
-  const [pts, setPts] = useState(() => (item.pts || []).map((p) => ({ x: num(p.x), y: num(p.y), e: !!p.e, ...(Number.isFinite(p.m) && p.m > 0 ? { m: p.m } : {}) })));
+  const [sketch, setPts] = useState(() => (item.pts || []).map((p) => ({ x: num(p.x), y: num(p.y), e: !!p.e, ...(Number.isFinite(p.m) && p.m > 0 ? { m: p.m } : {}) })));
+  const pts = useMemo(() => fitMeasuredPolygon(sketch), [sketch]);
   const [sel, setSel] = useState(null);
   const [hi, setHi] = useState(null);
   const [snap, setSnap] = useState(10);
@@ -181,8 +181,10 @@ export function PolyEditor({ item, title, onSave, onClose }) {
   for (let y = Math.ceil(w0.y / gridStep) * gridStep; y <= w1.y && grid.length < 400; y += gridStep) grid.push(['h', view.oy + y * view.s]);
 
   const pointer = (e) => {
-    const r = svgRef.current.getBoundingClientRect();
-    return [((e.clientX - r.left) * EW) / r.width, ((e.clientY - r.top) * EH) / r.height];
+    const svg = svgRef.current;
+    const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    const local = p.matrixTransform(svg.getScreenCTM().inverse());
+    return [local.x, local.y];
   };
   const snapW = (p) => ({ x: Math.round(p.x / snap) * snap, y: Math.round(p.y / snap) * snap });
 
@@ -192,7 +194,7 @@ export function PolyEditor({ item, title, onSave, onClose }) {
     e.preventDefault();
     if (drawing && i === 0 && n >= 3) { finishDrawing(); return; }
     svgRef.current.setPointerCapture?.(e.pointerId);
-    drag.current = { i, view };
+    drag.current = { i, view, base: pts };
     setSel(i);
   };
   const onMove = (e) => {
@@ -200,7 +202,8 @@ export function PolyEditor({ item, title, onSave, onClose }) {
     if (!d) return;
     const [x, y] = pointer(e);
     const w = snapW(toW(d.view, x, y));
-    setPts((ps) => {
+    setPts(() => {
+      const ps = d.base;
       // «Прилипание» к другим углам по горизонтали и вертикали — так проще держать прямые углы.
       const tol = 9 / d.view.s;
       for (const [j, q] of ps.entries()) {
@@ -209,7 +212,7 @@ export function PolyEditor({ item, title, onSave, onClose }) {
         if (Math.abs(q.y - w.y) < tol) w.y = q.y;
       }
       if (ps[d.i].x === w.x && ps[d.i].y === w.y) return ps;
-      return clearPolyMeasurements(ps, [(d.i - 1 + ps.length) % ps.length, d.i]).map((p, j) => (j === d.i ? { ...p, x: w.x, y: w.y } : p));
+      return ps.map((p, j) => (j === d.i ? { ...p, x: w.x, y: w.y } : p));
     });
   };
   const onUp = () => { if (drag.current) { drag.current = null; redraw((v) => v + 1); } };
@@ -234,8 +237,8 @@ export function PolyEditor({ item, title, onSave, onClose }) {
     setSel(null);
   };
   const clear = () => { setPts([]); setSel(null); room.current = null; setDrawing(true); };
-  const setCoord = (key) => (v) => setPts((ps) => clearPolyMeasurements(ps, [(sel - 1 + ps.length) % ps.length, sel]).map((p, j) => (j === sel ? { ...p, [key]: v } : p)));
-  const toggleEdge = (i) => setPts(pts.map((p, j) => (j === i ? { ...p, e: !p.e } : p)));
+  const setCoord = (key) => (v) => setPts((ps) => fitMeasuredPolygon(ps).map((p, j) => (j === sel ? { ...p, [key]: v } : p)));
+  const toggleEdge = (i) => setPts((ps) => ps.map((p, j) => (j === i ? { ...p, e: !p.e } : p)));
   const allOn = n >= 3 && pts.every((p) => p.e);
 
   const save = () => {
@@ -318,10 +321,10 @@ export function PolyEditor({ item, title, onSave, onClose }) {
             <div class="pe__list-head">
               <span class="eyebrow">Стороны</span>
               ${n >= 3 ? html`
-                <button type="button" class="link-btn" onClick=${() => setPts(pts.map((p) => ({ ...p, e: !allOn })))}>${allOn ? 'Снять все торцы' : 'Все торцы'}</button>` : null}
+                <button type="button" class="link-btn" onClick=${() => setPts((ps) => ps.map((p) => ({ ...p, e: !allOn })))}>${allOn ? 'Снять все торцы' : 'Все торцы'}</button>` : null}
             </div>
-            ${n >= 3 ? html`<p class="pe__hint">Введённые замеры сохраняются. Чертёж подстраивается под них; площадь ориентировочная. Перемещение, добавление или удаление угла сбрасывает замеры изменённых сторон.</p>
-              ${hasMeasures ? html`<button type="button" class="link-btn" onClick=${() => setPts((ps) => clearPolyMeasurements(ps, ps.map((_, i) => i)))}>Сбросить замеры</button>` : null}
+            ${n >= 3 ? html`<p class="pe__hint">Замеры v9: введите длины в пустые поля. Серые числа ≈ — оценки по чертежу. Галочка означает сохранённый замер. Перетаскивание углов не меняет замеры; добавление или удаление угла сбрасывает замеры изменённых сторон.</p>
+              ${hasMeasures ? html`<button type="button" class="link-btn" onClick=${() => setPts((ps) => clearPolyMeasurements(fitMeasuredPolygon(ps), ps.map((_, i) => i)))}>Сбросить замеры</button>` : null}
               ${mismatch > 2 ? html`<p class="pe__hint" role="status">Размеры не совпадают с контуром (до ${fmtNum(mismatch, 1)} мм). Проверьте форму; замеры не изменены.</p>` : null}` : null}
             ${n < 3 ? html`<p class="pe__empty">Выберите заготовку сверху или нарисуйте фигуру по углам.</p>` : html`
               <div class="pe__list">
@@ -329,8 +332,20 @@ export function PolyEditor({ item, title, onSave, onClose }) {
                   <div class=${'pe__row' + (hi === sd.i ? ' is-hi' : '')} key=${sd.i}
                     onPointerEnter=${() => setHi(sd.i)} onPointerLeave=${() => setHi(null)}>
                     <span class="pe__row-no">${sd.i + 1}–${((sd.i + 1) % n) + 1}${sd.measured ? " ✓" : ""}</span>
-                    <${CommitNum} suffix="мм" aria=${'Длина стороны ' + (sd.i + 1)} value=${sd.len} measure=${true}
-                      onCommit=${(v) => setPts((ps) => measurePolySide(ps, sd.i, v))} />
+                    <label class="field field--commit"><span class="field__box">
+                      <input type="text" inputmode="numeric" autocomplete="off" enterkeyhint="next"
+                        aria-label=${'Длина стороны ' + (sd.i + 1)} data-testid=${'poly-side-' + sd.i}
+                        value=${sd.measured ? String(pts[sd.i].m) : ''}
+                        placeholder=${'≈ ' + fmtInt(sd.len)}
+                        onInput=${(e) => {
+                          const value = cleanNum(e.currentTarget.value);
+                          if (e.currentTarget.value !== value) e.currentTarget.value = value;
+                          setPts((ps) => setPolyMeasurement(ps, sd.i, value));
+                          setDrawing(false);
+                          setSel(null);
+                        }} />
+                      <span class="field__suffix">мм</span>
+                    </span></label>
                     <button type="button" class=${'chip' + (sd.on ? ' is-on' : '')} aria-pressed=${sd.on ? 'true' : 'false'}
                       onClick=${() => toggleEdge(sd.i)}>Торец</button>
                   </div>`)}
