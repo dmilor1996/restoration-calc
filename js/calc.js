@@ -77,7 +77,7 @@ export function shapeSides(item) {
   const o = shapeOutline(item);
   return o.ids.map((id, i) => ({
     id,
-    len: o.pts.length ? dist(o.pts[i], o.pts[(i + 1) % o.pts.length]) : 0,
+    len: o.pts.length ? (item.shape === 'poly' ? measuredSideLength({ ...o.pts[i], m: item.pts[i].m }, o.pts[(i + 1) % o.pts.length]) : dist(o.pts[i], o.pts[(i + 1) % o.pts.length])) : 0,
     on: item.shape === 'poly' ? !!item.pts?.[i]?.e : !!item.edges?.[id],
   }));
 }
@@ -106,6 +106,44 @@ export function setSideLength(pts, i, length) {
   const move = n > 3 ? [(i + 1) % n, (i + 2) % n] : [(i + 1) % n];
   for (const j of move) { out[j].x = Math.round((out[j].x + dx) * 10) / 10; out[j].y = Math.round((out[j].y + dy) * 10) / 10; }
   return out;
+}
+
+export function measuredSideLength(p,q) {
+  return Number.isFinite(p.m) && p.m > 0 ? p.m : dist(p,q);
+}
+
+export function measuredSideError(pts) {
+  return pts.reduce((max,p,i)=>Number.isFinite(p.m)&&p.m>0?Math.max(max,Math.abs(p.m-dist(p,pts[(i+1)%pts.length]))):max,0);
+}
+
+export function measurePolySide(pts,i,length) {
+  if (!Number.isFinite(length) || length<=0 || !pts[i] || pts.length<3) return pts;
+  const out=pts.map(p=>({...p}));
+  out[i].m=length;
+  // Project all measured edges together. The sketch supplies the otherwise unknown angles.
+  // Both endpoints move symmetrically; original measurements are never overwritten.
+  for(let pass=0;pass<600;pass++){
+    if(measuredSideError(out)<0.02) break;
+    const delta=out.map(()=>({x:0,y:0}));
+    for(let j=0;j<out.length;j++){
+      const a=out[j], k=(j+1)%out.length,b=out[k];
+      if(!Number.isFinite(a.m)||a.m<=0) continue;
+      const d=dist(a,b);
+      const ux=d>1e-9?(b.x-a.x)/d:1,uy=d>1e-9?(b.y-a.y)/d:0;
+      const step=(d-a.m)*0.35;
+      delta[j].x+=ux*step;delta[j].y+=uy*step;
+      delta[k].x-=ux*step;delta[k].y-=uy*step;
+    }
+    out.forEach((p,j)=>{p.x+=delta[j].x;p.y+=delta[j].y;});
+  }
+  return out.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))?out:pts.map((p,j)=>j===i?{...p,m:length}:{...p});
+}
+
+export function clearPolyMeasurements(pts,indices) {
+  return pts.map((p,i)=>{
+    if(!indices.includes(i))return p;
+    const {m,...rest}=p;return rest;
+  });
 }
 
 /** Полная геометрия позиции: лицевая площадь, кромка, итог с учётом количества. */
