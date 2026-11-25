@@ -4,15 +4,15 @@ import {
   materialsOfKind, pickMaterial, materialCostPerM2, upsertRecent, orderServices, aggregateStats,
   templateVars, templateParts, usedKeys, normKey,
   fmtArea, fmtInt, fmtNum, fmtPrice, plural,
-} from './calc.js';
+} from './calc.js?v=9';
 import { uid, newItem, defaultDraft, normalizeSettings, normalizeDraft, DEFAULT_TEMPLATES } from './defaults.js';
 import {
   loadSettings, saveSettings, loadDraft, saveDraft, loadOrders, saveOrders, loadRecent, saveRecent, loadTheme, saveTheme,
   cloudConfigured, initCloud, pushSettings, pushOrder, signIn, signOutCloud,
 } from './store.js';
 import { Icon, Num, Text, Stepper, Switch, AutoText, Select, copyText } from './ui.js';
-import { Diagram, PolyEditor } from './diagram.js';
-import { NormPanel, CostPage, FactSection, startFact, StatsPage } from './cost.js';
+import { Diagram, PolyEditor } from './diagram.js?v=9';
+import { NormPanel, CostPage, FactSection, startFact, StatsPage } from './cost.js?v=9';
 
 // ── Справочники ─────────────────────────────────────────────────
 
