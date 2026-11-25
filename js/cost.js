@@ -4,7 +4,7 @@ import { html, useState, useMemo } from './vendor/preact-htm.js';
 import {
   num, materialCostPerM2, materialMlPerM2, materialsOfKind, pickMaterial, travelPlan, calcTotals, calcCost, svcHours,
   factSummary, aggregateStats, normKey, fmtInt, fmtNum, fmtArea, fmtPrice, plural,
-} from './calc.js';
+} from './calc.js?v=9';
 import { uid, normalizeDraft } from './defaults.js';
 import { Icon, Num, Text, Select } from './ui.js';
 
