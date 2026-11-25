@@ -110,7 +110,8 @@ function ItemCard({ item, kind, index, onChange, onDelete, onDuplicate, onEditPo
   });
 
   const fields = item.shape === 'trap' && item.four ? K.fields.trap4 : K.fields[item.shape];
-  const hint = badTrap ? 'Из таких размеров фигура не складывается — проверьте грани'
+  const measuredPoly = isPoly && item.pts?.some((p) => Number.isFinite(p.m) && p.m > 0);
+  const hint = measuredPoly ? 'Площадь ориентировочная; введённые замеры сохранены' : badTrap ? 'Из таких размеров фигура не складывается — проверьте грани'
     : anyOn ? 'Выделенные грани войдут в расчёт' : 'Нажмите на грани, которые нужно обработать';
 
   return html`
