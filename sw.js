@@ -1,10 +1,10 @@
 // Офлайн-режим: сайт открывается без интернета (например, на выезде).
 // Стратегия: сначала сеть (чтобы обновления приходили сразу), при её отсутствии — сохранённая копия.
 
-const CACHE = 'rc-v8';
+const CACHE = 'rc-v9';
 const CORE = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/cost.js', 'js/ui.js', 'js/diagram.js', 'js/calc.js', 'js/defaults.js', 'js/store.js', 'js/firebase-config.js', 'js/vendor/preact-htm.js', 'js/vendor/firebase.js', 'css/fonts.css',
+  'js/app.js', 'js/cost.js', 'js/ui.js', 'js/diagram.js', 'js/calc.js', 'js/app.js?v=9', 'js/cost.js?v=9', 'js/diagram.js?v=9', 'js/calc.js?v=9', 'js/defaults.js', 'js/store.js', 'js/firebase-config.js', 'js/vendor/preact-htm.js', 'js/vendor/firebase.js', 'css/fonts.css',
   'fonts/Onest-400-cyrillic.woff2', 'fonts/Onest-400-latin.woff2', 'fonts/JetBrainsMono-400-cyrillic.woff2', 'fonts/JetBrainsMono-400-latin.woff2',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
@@ -35,7 +35,7 @@ self.addEventListener('fetch', (e) => {
       if (hit) return hit;
     }
     try {
-      const res = await fetch(req);
+      const res = await fetch(req, url.origin === self.location.origin ? { cache: 'reload' } : {});
       if (res.ok || res.type === 'opaque') cache.put(req, res.clone());
       return res;
     } catch (err) {
