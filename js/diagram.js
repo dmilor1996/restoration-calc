@@ -218,7 +218,7 @@ export function PolyEditor({ item, title, onSave, onClose }) {
     const [x, y] = pointer(e);
     const w = snapW(toW(view, x, y));
     setSel(pts.length);
-    setPts((ps) => [...ps, { x: w.x, y: w.y, e: false }]);
+    setPts((ps) => [...clearPolyMeasurements(ps, [ps.length - 1]), { x: w.x, y: w.y, e: false }]);
   };
   const insertAfter = (i) => {
     const p = pts[i], q = pts[(i + 1) % n];
