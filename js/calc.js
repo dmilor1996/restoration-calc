@@ -116,10 +116,24 @@ export function measuredSideError(pts) {
   return pts.reduce((max,p,i)=>Number.isFinite(p.m)&&p.m>0?Math.max(max,Math.abs(p.m-dist(p,pts[(i+1)%pts.length]))):max,0);
 }
 
+// Measurements are independent of the sketch; blank input removes only this measurement.
+export function setPolyMeasurement(pts, i, value) {
+  if (!pts[i]) return pts;
+  const length = Number(value);
+  return pts.map((p,j) => {
+    if (j !== i) return p;
+    const {m,...rest} = p;
+    return Number.isFinite(length) && length > 0 ? {...rest,m:length} : rest;
+  });
+}
+
 export function measurePolySide(pts,i,length) {
   if (!Number.isFinite(length) || length<=0 || !pts[i] || pts.length<3) return pts;
+  return fitMeasuredPolygon(setPolyMeasurement(pts,i,length));
+}
+
+export function fitMeasuredPolygon(pts) {
   const out=pts.map(p=>({...p}));
-  out[i].m=length;
   // Project all measured edges together. The sketch supplies the otherwise unknown angles.
   // Both endpoints move symmetrically; original measurements are never overwritten.
   for(let pass=0;pass<600;pass++){
@@ -136,7 +150,7 @@ export function measurePolySide(pts,i,length) {
     }
     out.forEach((p,j)=>{p.x+=delta[j].x;p.y+=delta[j].y;});
   }
-  return out.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))?out:pts.map((p,j)=>j===i?{...p,m:length}:{...p});
+  return out.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))?out:pts;
 }
 
 export function clearPolyMeasurements(pts,indices) {
